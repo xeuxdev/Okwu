@@ -34,7 +34,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   userProfile: DEFAULT_USER_PROFILE,
   stylePreferences: DEFAULT_STYLE_PREFERENCES,
   jobTargetSettings: DEFAULT_JOB_TARGET_SETTINGS,
-  autoInjectButton: true
+  autoInjectButton: true,
+  autoFillNote: true
 };
 
 const STORAGE_KEYS = {

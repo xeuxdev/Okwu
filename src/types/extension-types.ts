@@ -36,6 +36,7 @@ export interface ExtensionSettings {
   stylePreferences: StylePreferences;
   jobTargetSettings: JobTargetSettings;
   autoInjectButton: boolean;
+  autoFillNote: boolean;
 }
 
 export interface TargetProfileData {

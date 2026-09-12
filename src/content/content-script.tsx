@@ -1,11 +1,21 @@
 import { createRoot, Root } from 'react-dom/client';
 import { extractTargetProfileFromDom } from './dom-extractor';
 import { DraftCard } from './draft-card';
+import { findNoteTextarea, insertNoteIntoLinkedIn } from './note-injector';
+import {
+  ExtensionMessageResponse,
+  ExtensionSettings,
+  GenerateDraftResponse
+} from '../types/extension-types';
 
 let currentShadowHost: HTMLDivElement | null = null;
 let currentReactRoot: Root | null = null;
 let injectedButton: HTMLButtonElement | null = null;
 let floatingTrigger: HTMLButtonElement | null = null;
+let autoFillToastHost: HTMLDivElement | null = null;
+let isAutofilling = false;
+let lastHandledTextarea: HTMLTextAreaElement | null = null;
+let autofillPollInterval: ReturnType<typeof setInterval> | null = null;
 
 // Complete isolated styles for Shadow DOM (zero leaking from or to host page)
 const SHADOW_CSS = `
@@ -70,6 +80,7 @@ const SHADOW_CSS = `
   .border-slate-300 { border-color: #cbd5e1; }
   .border-amber-200 { border-color: #fde68a; }
   .border-red-200 { border-color: #fecaca; }
+  .border-emerald-200 { border-color: #a7f3d0; }
   .border-blue-100 { border-color: #dbeafe; }
   .border-blue-200\\/60 { border-color: rgba(191, 219, 254, 0.6); }
   .border-blue-300 { border-color: #93c5fd; }
@@ -254,6 +265,129 @@ function openAssistantModal() {
   );
 }
 
+function showAutofillToast(message: string, isDone: boolean = false) {
+  removeAutofillToast();
+
+  const toast = document.createElement('div');
+  toast.id = 'linkedin-ai-autofill-toast';
+  toast.style.cssText = `
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #0f172a;
+    color: #ffffff;
+    padding: 10px 18px;
+    border-radius: 9999px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    border: 1px solid #334155;
+  `;
+
+  const iconSvg = isDone
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+
+  const adjustBtn = isDone
+    ? `<button id="linkedin-ai-toast-adjust" style="background-color: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; margin-left: 4px;">Adjust</button>`
+    : '';
+
+  toast.innerHTML = `
+    <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
+    <div style="display:flex; align-items:center; gap:8px;">
+      ${iconSvg}
+      <span>${message}</span>
+    </div>
+    ${adjustBtn}
+    <button id="linkedin-ai-toast-close" style="background:none; border:none; color:#94a3b8; cursor:pointer; padding:0 4px; font-size:16px; line-height:1; display:flex; align-items:center;">&times;</button>
+  `;
+
+  document.body.appendChild(toast);
+  autoFillToastHost = toast;
+
+  toast.querySelector('#linkedin-ai-toast-close')?.addEventListener('click', () => {
+    removeAutofillToast();
+  });
+
+  toast.querySelector('#linkedin-ai-toast-adjust')?.addEventListener('click', () => {
+    removeAutofillToast();
+    openAssistantModal();
+  });
+
+  if (isDone) {
+    setTimeout(() => {
+      removeAutofillToast();
+    }, 6000);
+  }
+}
+
+function removeAutofillToast() {
+  if (autoFillToastHost) {
+    autoFillToastHost.remove();
+    autoFillToastHost = null;
+  }
+}
+
+async function checkAndAutofillNote() {
+  if (!isLinkedInProfilePage()) return;
+  if (isAutofilling) return;
+
+  const textarea = findNoteTextarea();
+  if (!textarea) {
+    if (lastHandledTextarea) {
+      lastHandledTextarea = null;
+      removeAutofillToast();
+    }
+    return;
+  }
+
+  // Already processed this textarea instance or user has typed manual content
+  if (textarea === lastHandledTextarea) return;
+  if (textarea.getAttribute('data-ai-autofilled') === 'true') return;
+  if (textarea.value.trim().length > 0) return;
+
+  chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response: ExtensionMessageResponse<ExtensionSettings>) => {
+    if (!response?.data) return;
+    const settings = response.data;
+    if (!settings.openaiApiKey || settings.autoFillNote === false) return;
+
+    isAutofilling = true;
+    lastHandledTextarea = textarea;
+    textarea.setAttribute('data-ai-autofilled', 'pending');
+
+    showAutofillToast('Auto-drafting personalized note with OpenAI...');
+
+    const targetProfile = extractTargetProfileFromDom();
+    chrome.runtime.sendMessage(
+      {
+        type: 'GENERATE_DRAFT',
+        payload: {
+          targetProfile,
+          jobTargetOverride: settings.jobTargetSettings?.enabled ? settings.jobTargetSettings : undefined
+        }
+      },
+      async (draftResponse: ExtensionMessageResponse<GenerateDraftResponse>) => {
+        isAutofilling = false;
+        if (draftResponse?.success && draftResponse.data?.draftText) {
+          const draft = draftResponse.data.draftText;
+          await insertNoteIntoLinkedIn(draft);
+          textarea.setAttribute('data-ai-autofilled', 'true');
+          showAutofillToast(`AI note auto-filled (${draft.length}/200 chars)`, true);
+        } else {
+          removeAutofillToast();
+          textarea.removeAttribute('data-ai-autofilled');
+        }
+      }
+    );
+  });
+}
+
 function injectProfileButton() {
   if (!isLinkedInProfilePage()) return;
   if (document.getElementById('linkedin-ai-draft-note-btn')) return;
@@ -353,6 +487,11 @@ function updateInjection() {
     } else {
       floatingTrigger.style.display = 'flex';
     }
+
+    // Start background watcher for instant autofill
+    if (!autofillPollInterval) {
+      autofillPollInterval = setInterval(checkAndAutofillNote, 450);
+    }
   } else {
     if (floatingTrigger) {
       floatingTrigger.style.display = 'none';
@@ -361,20 +500,29 @@ function updateInjection() {
       injectedButton.remove();
       injectedButton = null;
     }
+    if (autofillPollInterval) {
+      clearInterval(autofillPollInterval);
+      autofillPollInterval = null;
+    }
+    removeAutofillToast();
   }
 }
 
 // Initial run
 updateInjection();
 
-// Observe DOM mutations to handle client-side route transitions
+// Observe DOM mutations to handle client-side route transitions and modal opens
 let lastUrl = window.location.href;
 const observer = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     updateInjection();
-  } else if (isLinkedInProfilePage() && !document.getElementById('linkedin-ai-draft-note-btn')) {
-    injectProfileButton();
+  } else if (isLinkedInProfilePage()) {
+    if (!document.getElementById('linkedin-ai-draft-note-btn')) {
+      injectProfileButton();
+    }
+    // Check if modal opened on mutation
+    checkAndAutofillNote();
   }
 });
 
