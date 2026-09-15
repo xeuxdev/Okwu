@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Sparkles,
   Settings,
@@ -6,14 +6,14 @@ import {
   AlertCircle,
   ExternalLink,
   User,
-  ArrowRight
-} from 'lucide-react';
-import { ExtensionSettings } from '../types/extension-types';
-import { getSettings, DEFAULT_SETTINGS } from '../services/storage-service';
+  ArrowRight,
+} from "lucide-react";
+import { ExtensionSettings } from "../types/extension-types";
+import { getSettings, DEFAULT_SETTINGS } from "../services/storage-service";
 
 export const PopupApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [activeTabUrl, setActiveTabUrl] = useState<string>('');
+  const [activeTabUrl, setActiveTabUrl] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export const PopupApp: React.FC = () => {
     });
 
     // Detect active tab
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+    if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]?.url) {
           setActiveTabUrl(tabs[0].url);
@@ -34,28 +34,36 @@ export const PopupApp: React.FC = () => {
   }, []);
 
   const openOptionsPage = () => {
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
+    if (
+      typeof chrome !== "undefined" &&
+      chrome.runtime &&
+      chrome.runtime.openOptionsPage
+    ) {
       chrome.runtime.openOptionsPage();
     } else {
-      window.open('/options.html', '_blank');
+      window.open("/options.html", "_blank");
     }
   };
 
-  const isLinkedInProfile = activeTabUrl.includes('linkedin.com/in/');
-  const hasApiKey = Boolean(settings.openaiApiKey.trim());
-  const hasProfile = Boolean(settings.userProfile.fullName || settings.userProfile.currentRole);
-  const isReady = hasApiKey && hasProfile;
+  const isLinkedInProfile = activeTabUrl.includes("linkedin.com/in/");
+  const hasAiAccess = !settings.useCustomApiKey || Boolean(settings.openaiApiKey.trim());
+  const hasProfile = Boolean(
+    settings.userProfile.fullName ||
+    settings.userProfile.currentRole ||
+    settings.baseFactSheet?.identity.fullName
+  );
+  const isReady = hasAiAccess && hasProfile;
 
   if (isLoading) {
     return (
-      <div className="w-[360px] p-6 text-center text-xs font-medium text-slate-500 bg-white">
+      <div className="w-90 p-6 text-center text-xs font-medium text-slate-500 bg-white">
         Loading assistant...
       </div>
     );
   }
 
   return (
-    <div className="w-[360px] bg-white text-slate-800 antialiased">
+    <div className="w-90 bg-white text-slate-800 antialiased">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 p-4 bg-slate-50">
         <div className="flex items-center gap-2.5">
@@ -66,7 +74,9 @@ export const PopupApp: React.FC = () => {
             <h1 className="text-sm font-bold text-slate-900 leading-tight">
               LinkedIn Note Assistant
             </h1>
-            <p className="text-[11px] text-slate-500">OpenAI Personalized Notes</p>
+            <p className="text-[11px] text-slate-500">
+              OpenAI Personalized Notes
+            </p>
           </div>
         </div>
 
@@ -88,23 +98,32 @@ export const PopupApp: React.FC = () => {
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
                 isReady
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-amber-200 bg-amber-50 text-amber-700'
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
               }`}
             >
-              {isReady ? 'Ready to use' : 'Action required'}
+              {isReady ? "Ready to use" : "Action required"}
             </span>
           </div>
 
           <div className="space-y-1 text-[11px]">
             <div className="flex items-center gap-2">
-              {hasApiKey ? (
+              {hasAiAccess ? (
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
               ) : (
                 <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
               )}
-              <span className={hasApiKey ? 'text-slate-700' : 'text-amber-800 font-medium'}>
-                OpenAI API Key: {hasApiKey ? 'Configured' : 'Missing'}
+              <span
+                className={
+                  hasAiAccess ? "text-slate-700" : "text-amber-800 font-medium"
+                }
+              >
+                AI Engine:{" "}
+                {settings.useCustomApiKey
+                  ? settings.openaiApiKey.trim()
+                    ? "Custom API Key"
+                    : "Missing Custom Key"
+                  : "Cloud Plan Ready"}
               </span>
             </div>
 
@@ -114,8 +133,19 @@ export const PopupApp: React.FC = () => {
               ) : (
                 <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
               )}
-              <span className={hasProfile ? 'text-slate-700' : 'text-amber-800 font-medium'}>
-                Resume Profile: {hasProfile ? `${settings.userProfile.fullName || 'Loaded'}` : 'Not uploaded'}
+              <span
+                className={
+                  hasProfile ? "text-slate-700" : "text-amber-800 font-medium"
+                }
+              >
+                Resume Profile:{" "}
+                {hasProfile
+                  ? `${
+                      settings.userProfile.fullName ||
+                      settings.baseFactSheet?.identity.fullName ||
+                      "Loaded"
+                    }`
+                  : "Not uploaded"}
               </span>
             </div>
           </div>
@@ -127,7 +157,7 @@ export const PopupApp: React.FC = () => {
             <div className="flex items-center gap-2 mb-1.5">
               <User className="h-3.5 w-3.5 text-blue-600" />
               <span className="font-semibold text-slate-800 truncate">
-                {settings.userProfile.fullName || 'Your Profile'}
+                {settings.userProfile.fullName || "Your Profile"}
               </span>
             </div>
             {settings.userProfile.currentRole && (
@@ -160,7 +190,8 @@ export const PopupApp: React.FC = () => {
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3.5 text-xs text-blue-900">
             <p className="font-semibold mb-1">LinkedIn Profile Detected!</p>
             <p className="text-[11px] text-blue-700 mb-2.5">
-              Click the "Draft Note" button on the profile header or floating badge to generate a note.
+              Click the "Draft Note" button on the profile header or floating
+              badge to generate a note.
             </p>
           </div>
         ) : (

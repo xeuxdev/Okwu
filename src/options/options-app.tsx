@@ -1,24 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Sparkles,
   Save,
   CheckCircle2,
   AlertCircle,
-  ExternalLink
-} from 'lucide-react';
-import { ExtensionSettings, UserProfile, StylePreferences, JobTargetSettings } from '../types/extension-types';
-import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../services/storage-service';
-import { ApiKeyConfig } from './api-key-config';
-import { ResumeUploader } from './resume-uploader';
-import { ProfileEditor } from './profile-editor';
-import { StylePreferencesComponent } from './style-preferences';
-import { JobTargetConfig } from './job-target-config';
+  ExternalLink,
+} from "lucide-react";
+import {
+  ExtensionSettings,
+  UserProfile,
+  StylePreferences,
+  JobTargetSettings,
+  BaseFactSheet,
+  LinkedInSelfProfile
+} from "../types/extension-types";
+import {
+  getSettings,
+  saveSettings,
+  DEFAULT_SETTINGS,
+} from "../services/storage-service";
+import { ApiKeyConfig } from "./api-key-config";
+import { ResumeUploader } from "./resume-uploader";
+import { ProfileEditor } from "./profile-editor";
+import { StylePreferencesComponent } from "./style-preferences";
+import { JobTargetConfig } from "./job-target-config";
 
 export const OptionsApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [saveBanner, setSaveBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saveBanner, setSaveBanner] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
     getSettings().then((loaded) => {
@@ -36,14 +50,14 @@ export const OptionsApp: React.FC = () => {
 
     if (success) {
       setSaveBanner({
-        type: 'success',
-        text: 'Settings saved successfully! Your assistant is ready to draft notes.'
+        type: "success",
+        text: "Settings saved successfully! Your assistant is ready to draft notes.",
       });
       setTimeout(() => setSaveBanner(null), 4000);
     } else {
       setSaveBanner({
-        type: 'error',
-        text: 'Failed to save settings to extension storage.'
+        type: "error",
+        text: "Failed to save settings to extension storage.",
       });
     }
   };
@@ -54,6 +68,29 @@ export const OptionsApp: React.FC = () => {
 
   const handleModelChange = (openaiModel: string) => {
     setSettings((prev) => ({ ...prev, openaiModel }));
+  };
+
+  const handleProfileAndFactSheetParsed = (
+    userProfile: UserProfile,
+    baseFactSheet?: BaseFactSheet
+  ) => {
+    setSettings((prev) => ({
+      ...prev,
+      userProfile,
+      baseFactSheet: baseFactSheet || prev.baseFactSheet
+    }));
+  };
+
+  const handleLinkedInSynced = (linkedInSelfProfile: LinkedInSelfProfile) => {
+    setSettings((prev) => ({
+      ...prev,
+      linkedInSelfProfile,
+      userProfile: {
+        ...prev.userProfile,
+        fullName: linkedInSelfProfile.fullName || prev.userProfile.fullName,
+        currentRole: linkedInSelfProfile.currentRole || prev.userProfile.currentRole
+      }
+    }));
   };
 
   const handleProfileChange = (userProfile: UserProfile) => {
@@ -69,14 +106,18 @@ export const OptionsApp: React.FC = () => {
   };
 
   const isConfigured = Boolean(
-    settings.openaiApiKey.trim() &&
-    (settings.userProfile.fullName || settings.userProfile.currentRole)
+    (!settings.useCustomApiKey || settings.openaiApiKey.trim()) &&
+    (settings.userProfile.fullName ||
+      settings.userProfile.currentRole ||
+      settings.baseFactSheet?.identity.fullName)
   );
 
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="text-xs font-semibold text-slate-500">Loading settings...</div>
+        <div className="text-xs font-semibold text-slate-500">
+          Loading settings...
+        </div>
       </div>
     );
   }
@@ -95,7 +136,8 @@ export const OptionsApp: React.FC = () => {
                 LinkedIn Connection Note Assistant
               </h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                Personalized connection requests powered by your resume and OpenAI
+                Personalized connection requests powered by your resume and
+                OpenAI
               </p>
             </div>
           </div>
@@ -104,16 +146,16 @@ export const OptionsApp: React.FC = () => {
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
                 isConfigured
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-amber-200 bg-amber-50 text-amber-700'
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
               }`}
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  isConfigured ? 'bg-emerald-500' : 'bg-amber-500'
+                  isConfigured ? "bg-emerald-500" : "bg-amber-500"
                 }`}
               />
-              {isConfigured ? 'Ready to Draft' : 'Setup Incomplete'}
+              {isConfigured ? "Ready to Draft" : "Setup Incomplete"}
             </span>
 
             <button
@@ -123,7 +165,7 @@ export const OptionsApp: React.FC = () => {
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:opacity-50 transition-colors"
             >
               <Save className="h-4 w-4" />
-              <span>{isSaving ? 'Saving...' : 'Save Settings'}</span>
+              <span>{isSaving ? "Saving..." : "Save Settings"}</span>
             </button>
           </div>
         </header>
@@ -132,13 +174,13 @@ export const OptionsApp: React.FC = () => {
         {saveBanner && (
           <div
             className={`mb-6 flex items-center justify-between rounded-xl p-4 text-xs font-medium border shadow-sm ${
-              saveBanner.type === 'success'
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : 'bg-red-50 text-red-800 border-red-200'
+              saveBanner.type === "success"
+                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                : "bg-red-50 text-red-800 border-red-200"
             }`}
           >
             <div className="flex items-center gap-2">
-              {saveBanner.type === 'success' ? (
+              {saveBanner.type === "success" ? (
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
               ) : (
                 <AlertCircle className="h-4 w-4 text-red-600 shrink-0" />
@@ -161,7 +203,8 @@ export const OptionsApp: React.FC = () => {
                   Instant Autofill when Note Box Opens
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Automatically drafts and populates the LinkedIn note without requiring you to click the assistant button.
+                  Automatically drafts and populates the LinkedIn note without
+                  requiring you to click the assistant button.
                 </p>
               </div>
             </div>
@@ -171,28 +214,43 @@ export const OptionsApp: React.FC = () => {
                 type="checkbox"
                 checked={settings.autoFillNote}
                 onChange={(e) =>
-                  setSettings((prev) => ({ ...prev, autoFillNote: e.target.checked }))
+                  setSettings((prev) => ({
+                    ...prev,
+                    autoFillNote: e.target.checked,
+                  }))
                 }
                 className="sr-only peer"
                 aria-label="Toggle Instant Autofill"
               />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
             </label>
           </div>
 
-          {/* 1. OpenAI Configuration */}
+          {/* 1. AI Plan & Engine Configuration */}
           <ApiKeyConfig
             apiKey={settings.openaiApiKey}
             model={settings.openaiModel}
+            useCustomApiKey={settings.useCustomApiKey}
+            planTier={settings.planTier}
             onApiKeyChange={handleApiKeyChange}
             onModelChange={handleModelChange}
+            onUseCustomApiKeyChange={(useCustomApiKey) =>
+              setSettings((prev) => ({ ...prev, useCustomApiKey }))
+            }
+            onPlanTierChange={(planTier) =>
+              setSettings((prev) => ({ ...prev, planTier }))
+            }
           />
 
-          {/* 2. Resume Upload */}
+          {/* 2. Resume & LinkedIn Base Fact Grounding */}
           <ResumeUploader
             apiKey={settings.openaiApiKey}
             model={settings.openaiModel}
-            onProfileParsed={handleProfileChange}
+            useCustomApiKey={settings.useCustomApiKey}
+            baseFactSheet={settings.baseFactSheet}
+            linkedInSelfProfile={settings.linkedInSelfProfile}
+            onProfileParsed={handleProfileAndFactSheetParsed}
+            onLinkedInProfileSynced={handleLinkedInSynced}
           />
 
           {/* 3. Structured Profile */}
@@ -232,7 +290,7 @@ export const OptionsApp: React.FC = () => {
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:opacity-50 transition-colors"
             >
               <Save className="h-4 w-4" />
-              <span>{isSaving ? 'Saving...' : 'Save All Settings'}</span>
+              <span>{isSaving ? "Saving..." : "Save All Settings"}</span>
             </button>
           </div>
         </main>

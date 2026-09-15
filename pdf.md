@@ -25,6 +25,7 @@ Single-user tool, for personal use by the person installing it. No multi-user/te
 ## 5. User Flow
 
 ### 5.1 Onboarding (one-time setup)
+
 1. User installs extension, clicks icon, opens Settings/Options page.
 2. User uploads resume file (PDF or DOCX).
 3. Extension parses resume client-side into a structured profile:
@@ -37,6 +38,7 @@ Single-user tool, for personal use by the person installing it. No multi-user/te
 6. Profile is saved to `chrome.storage.local`. User can return to Settings anytime to edit/re-upload.
 
 ### 5.2 Core flow (per connection)
+
 1. User navigates to a LinkedIn profile (`linkedin.com/in/*`) in their normal browsing.
 2. Content script detects the profile page and injects a small "Draft note" button near the native Connect button (or the user can trigger via the extension's toolbar icon).
 3. On click, content script extracts visible profile data:
@@ -52,6 +54,7 @@ Single-user tool, for personal use by the person installing it. No multi-user/te
 8. User reviews the filled note directly in LinkedIn's UI and clicks LinkedIn's own Send button. Extension does not touch the Send action.
 
 ### 5.3 Edge cases
+
 - If LinkedIn's DOM structure has changed and selectors fail to find expected elements, show a clear error ("Couldn't read this profile — LinkedIn may have updated their page") rather than silently failing.
 - If profile has minimal public info (locked/limited profile), fall back to a generic-but-still-personalized note using just name + headline.
 - If API call fails (rate limit, network, bad key), show inline error with retry option; never block the user from manually writing a note instead.
@@ -91,11 +94,13 @@ Single-user tool, for personal use by the person installing it. No multi-user/te
 ```
 
 **Key libraries:**
+
 - `pdf.js` — client-side PDF text extraction
 - `mammoth.js` — client-side DOCX text extraction
 - Anthropic API (`/v1/messages`) — called from the service worker with the user's stored API key
 
 **Permissions needed in manifest.json:**
+
 - `activeTab` — read the currently open LinkedIn tab
 - `storage` — persist user profile locally
 - `scripting` — inject content script / button
@@ -104,11 +109,13 @@ Single-user tool, for personal use by the person installing it. No multi-user/te
 ## 8. Prompt Design (for background worker → Claude API call)
 
 Inputs to the prompt:
+
 - User's resume summary (role, skills, highlights)
 - User's style notes
 - Scraped target profile info (name, headline, company, about excerpt)
 
 Prompt should instruct Claude to:
+
 - Write 1–3 sentences, under 300 characters total
 - Reference something specific and genuine about the target person (not generic flattery)
 - Match the user's stated tone

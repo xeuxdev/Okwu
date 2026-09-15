@@ -15,24 +15,76 @@ export interface StylePreferences {
   sampleNote: string;
 }
 
-export type JobOutreachGoal =
-  | 'applied_followup'
-  | 'seeking_referral'
-  | 'informational_chat'
-  | 'hiring_manager';
+export type ConversationHookType =
+  | 'culture_question'
+  | 'tech_discussion'
+  | 'project_appreciation'
+  | 'applied_conversation'
+  | 'direct_inquiry';
 
 export interface JobTargetSettings {
   enabled: boolean;
   targetCompany: string;
   targetRole: string;
-  applicationStatus: 'applied' | 'planning_to_apply';
-  outreachGoal: JobOutreachGoal;
+  applicationStatus: 'applied' | 'planning_to_apply' | 'dream_company';
+  conversationHook: ConversationHookType;
+  customTalkingPoint: string;
+}
+
+export type PlanTier = 'free_cloud' | 'pro_subscription' | 'byok';
+
+export interface CareerMilestone {
+  company: string;
+  role: string;
+  timeframe: string;
+  keyImpact: string;
+  domain: string;
+  technologies: string[];
+}
+
+export interface TechStackCategory {
+  languages: string[];
+  frameworks: string[];
+  toolsAndInfra: string[];
+  specializations: string[];
+}
+
+export interface LinkedInSelfProfile {
+  fullName: string;
+  headline: string;
+  currentCompany: string;
+  currentRole: string;
+  location: string;
+  vanityUrl: string;
+  summary: string;
+}
+
+export interface BaseFactSheet {
+  identity: {
+    fullName: string;
+    headline: string;
+    currentRole: string;
+    currentCompany: string;
+    yearsOfExperience: number;
+    location: string;
+    targetRoles: string[];
+  };
+  techStack: TechStackCategory;
+  careerMilestones: CareerMilestone[];
+  conversationHooks: string[];
+  compactBio: string;
+  linkedInSyncedAt?: string;
+  resumeParsedAt?: string;
 }
 
 export interface ExtensionSettings {
   openaiApiKey: string;
   openaiModel: string;
+  useCustomApiKey: boolean;
+  planTier: PlanTier;
   userProfile: UserProfile;
+  baseFactSheet?: BaseFactSheet;
+  linkedInSelfProfile?: LinkedInSelfProfile;
   stylePreferences: StylePreferences;
   jobTargetSettings: JobTargetSettings;
   autoInjectButton: boolean;
@@ -60,11 +112,14 @@ export interface GenerateDraftResponse {
   draftText?: string;
   error?: string;
   characterCount?: number;
+  planUsed?: string;
+  matchedHighlight?: string;
 }
 
 export interface ParseResumeResponse {
   success: boolean;
   profile?: UserProfile;
+  baseFactSheet?: BaseFactSheet;
   error?: string;
 }
 
@@ -76,7 +131,8 @@ export interface TestConnectionResponse {
 
 export type ExtensionMessageType =
   | { type: 'GENERATE_DRAFT'; payload: GenerateDraftRequest }
-  | { type: 'PARSE_RESUME_TEXT'; payload: { rawText: string } }
+  | { type: 'PARSE_RESUME_TO_FACT_SHEET'; payload: { rawText: string; linkedInProfile?: LinkedInSelfProfile } }
+  | { type: 'SYNC_MY_LINKEDIN_PROFILE' }
   | { type: 'TEST_OPENAI_KEY'; payload: { apiKey: string; model: string } }
   | { type: 'GET_SETTINGS' }
   | { type: 'SAVE_SETTINGS'; payload: ExtensionSettings }

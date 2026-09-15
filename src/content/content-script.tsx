@@ -158,6 +158,8 @@ const SHADOW_CSS = `
   .text-emerald-600 { color: #059669 !important; }
   .text-emerald-700 { color: #047857 !important; }
   .text-emerald-800 { color: #065f46 !important; }
+  .text-emerald-900 { color: #064e3b !important; }
+  .text-emerald-950 { color: #022c22 !important; }
   .flex { display: flex; }
   .inline-flex { display: inline-flex; }
   .items-center { align-items: center; }
@@ -194,7 +196,10 @@ const SHADOW_CSS = `
   .leading-snug { line-height: 1.375; }
   .leading-relaxed { line-height: 1.625; }
   .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
   .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
+  .text-\\[10px\\] { font-size: 10px; line-height: 14px; }
+  .text-\\[11px\\] { font-size: 11px; line-height: 15px; }
   .transition-colors { transition-property: color, background-color, border-color; transition-duration: 150ms; }
   .cursor-pointer { cursor: pointer; }
   .hover\\:bg-slate-50:hover { background-color: #f8fafc; }
@@ -355,13 +360,14 @@ async function checkAndAutofillNote() {
   chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response: ExtensionMessageResponse<ExtensionSettings>) => {
     if (!response?.data) return;
     const settings = response.data;
-    if (!settings.openaiApiKey || settings.autoFillNote === false) return;
+    if (settings.autoFillNote === false) return;
+    if (settings.useCustomApiKey && !settings.openaiApiKey) return;
 
     isAutofilling = true;
     lastHandledTextarea = textarea;
     textarea.setAttribute('data-ai-autofilled', 'pending');
 
-    showAutofillToast('Auto-drafting personalized note with OpenAI...');
+    showAutofillToast('Auto-drafting conversation starter with AI...');
 
     const targetProfile = extractTargetProfileFromDom();
     chrome.runtime.sendMessage(

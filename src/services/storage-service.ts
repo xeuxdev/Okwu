@@ -2,7 +2,8 @@ import {
   ExtensionSettings,
   UserProfile,
   StylePreferences,
-  JobTargetSettings
+  JobTargetSettings,
+  BaseFactSheet
 } from '../types/extension-types';
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -11,6 +12,27 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   skills: [],
   experienceHighlights: [],
   summary: ''
+};
+
+export const DEFAULT_BASE_FACT_SHEET: BaseFactSheet = {
+  identity: {
+    fullName: '',
+    headline: '',
+    currentRole: '',
+    currentCompany: '',
+    yearsOfExperience: 0,
+    location: '',
+    targetRoles: []
+  },
+  techStack: {
+    languages: [],
+    frameworks: [],
+    toolsAndInfra: [],
+    specializations: []
+  },
+  careerMilestones: [],
+  conversationHooks: [],
+  compactBio: ''
 };
 
 export const DEFAULT_STYLE_PREFERENCES: StylePreferences = {
@@ -25,13 +47,17 @@ export const DEFAULT_JOB_TARGET_SETTINGS: JobTargetSettings = {
   targetCompany: '',
   targetRole: '',
   applicationStatus: 'applied',
-  outreachGoal: 'applied_followup'
+  conversationHook: 'culture_question',
+  customTalkingPoint: ''
 };
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   openaiApiKey: '',
   openaiModel: 'gpt-4o-mini',
+  useCustomApiKey: false,
+  planTier: 'free_cloud',
   userProfile: DEFAULT_USER_PROFILE,
+  baseFactSheet: DEFAULT_BASE_FACT_SHEET,
   stylePreferences: DEFAULT_STYLE_PREFERENCES,
   jobTargetSettings: DEFAULT_JOB_TARGET_SETTINGS,
   autoInjectButton: true,
@@ -55,6 +81,20 @@ export async function getSettings(): Promise<ExtensionSettings> {
               ...DEFAULT_USER_PROFILE,
               ...(stored.userProfile || {})
             },
+            baseFactSheet: stored.baseFactSheet
+              ? {
+                  ...DEFAULT_BASE_FACT_SHEET,
+                  ...stored.baseFactSheet,
+                  identity: {
+                    ...DEFAULT_BASE_FACT_SHEET.identity,
+                    ...(stored.baseFactSheet.identity || {})
+                  },
+                  techStack: {
+                    ...DEFAULT_BASE_FACT_SHEET.techStack,
+                    ...(stored.baseFactSheet.techStack || {})
+                  }
+                }
+              : DEFAULT_BASE_FACT_SHEET,
             stylePreferences: {
               ...DEFAULT_STYLE_PREFERENCES,
               ...(stored.stylePreferences || {})
@@ -83,6 +123,21 @@ export async function getSettings(): Promise<ExtensionSettings> {
           ...DEFAULT_USER_PROFILE,
           ...(parsed.userProfile || {})
         },
+        baseFactSheet: parsed.baseFactSheet
+          ? {
+              ...DEFAULT_BASE_FACT_SHEET,
+              ...parsed.baseFactSheet,
+              identity: {
+                ...DEFAULT_BASE_FACT_SHEET.identity,
+                ...(parsed.baseFactSheet.identity || {})
+              },
+              techStack: {
+                ...DEFAULT_BASE_FACT_SHEET.techStack,
+                ...(parsed.baseFactSheet.techStack || {})
+              }
+            }
+          : DEFAULT_BASE_FACT_SHEET,
+        linkedInSelfProfile: parsed.linkedInSelfProfile,
         stylePreferences: {
           ...DEFAULT_STYLE_PREFERENCES,
           ...(parsed.stylePreferences || {})

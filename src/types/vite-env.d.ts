@@ -13,3 +13,6 @@ declare module 'mammoth' {
   }
   export function extractRawText(options: { arrayBuffer: ArrayBuffer }): Promise<RawTextResult>;
 }
+
+declare const __DEFAULT_OPENAI_KEY__: string;
+declare const __DEFAULT_OPENAI_MODEL__: string;
