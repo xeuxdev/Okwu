@@ -3,8 +3,11 @@ import {
   UserProfile,
   StylePreferences,
   JobTargetSettings,
-  BaseFactSheet
+  BaseFactSheet,
+  UsageStats,
+  PlanTier
 } from '../types/extension-types';
+import { getCurrentBillingMonth } from './plan-service';
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
   fullName: '',
@@ -51,22 +54,46 @@ export const DEFAULT_JOB_TARGET_SETTINGS: JobTargetSettings = {
   customTalkingPoint: ''
 };
 
+export const DEFAULT_USAGE_STATS: UsageStats = {
+  messagesUsedThisMonth: 0,
+  currentBillingMonth: getCurrentBillingMonth(),
+  proSubscribed: false
+};
+
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   openaiApiKey: '',
   openaiModel: 'gpt-4o-mini',
   useCustomApiKey: false,
-  planTier: 'free_cloud',
+  planTier: 'free_trial',
   userProfile: DEFAULT_USER_PROFILE,
   baseFactSheet: DEFAULT_BASE_FACT_SHEET,
   stylePreferences: DEFAULT_STYLE_PREFERENCES,
   jobTargetSettings: DEFAULT_JOB_TARGET_SETTINGS,
   autoInjectButton: true,
-  autoFillNote: true
+  autoFillNote: true,
+  usageStats: DEFAULT_USAGE_STATS
 };
 
 const STORAGE_KEYS = {
   SETTINGS: 'linkedin_connect_settings'
 } as const;
+
+function normalizePlanTier(rawTier?: PlanTier | string): PlanTier {
+  if (rawTier === 'pro_subscription') return 'pro_subscription';
+  if (rawTier === 'byok') return 'byok';
+  return 'free_trial';
+}
+
+function normalizeUsageStats(stored?: Partial<UsageStats>, tier?: PlanTier): UsageStats {
+  const currentMonth = getCurrentBillingMonth();
+  const isPro = tier === 'pro_subscription' || Boolean(stored?.proSubscribed);
+  return {
+    messagesUsedThisMonth: stored?.currentBillingMonth === currentMonth ? (stored?.messagesUsedThisMonth ?? 0) : 0,
+    currentBillingMonth: stored?.currentBillingMonth || currentMonth,
+    proSubscribed: isPro,
+    proSubscribedAt: stored?.proSubscribedAt
+  };
+}
 
 export async function getSettings(): Promise<ExtensionSettings> {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -74,9 +101,12 @@ export async function getSettings(): Promise<ExtensionSettings> {
       chrome.storage.local.get([STORAGE_KEYS.SETTINGS], (result) => {
         const stored = result[STORAGE_KEYS.SETTINGS] as Partial<ExtensionSettings> | undefined;
         if (stored) {
+          const effectiveTier = normalizePlanTier(stored.planTier);
           resolve({
             ...DEFAULT_SETTINGS,
             ...stored,
+            planTier: effectiveTier,
+            usageStats: normalizeUsageStats(stored.usageStats, effectiveTier),
             userProfile: {
               ...DEFAULT_USER_PROFILE,
               ...(stored.userProfile || {})
@@ -116,9 +146,12 @@ export async function getSettings(): Promise<ExtensionSettings> {
     const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<ExtensionSettings>;
+      const effectiveTier = normalizePlanTier(parsed.planTier);
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
+        planTier: effectiveTier,
+        usageStats: normalizeUsageStats(parsed.usageStats, effectiveTier),
         userProfile: {
           ...DEFAULT_USER_PROFILE,
           ...(parsed.userProfile || {})

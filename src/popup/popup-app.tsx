@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { ExtensionSettings } from "../types/extension-types";
 import { getSettings, DEFAULT_SETTINGS } from "../services/storage-service";
+import { getPlanStatus } from "../services/plan-service";
 
 export const PopupApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
@@ -45,6 +46,7 @@ export const PopupApp: React.FC = () => {
     }
   };
 
+  const planStatus = getPlanStatus(settings);
   const isLinkedInProfile = activeTabUrl.includes("linkedin.com/in/");
   const hasAiAccess = !settings.useCustomApiKey || Boolean(settings.openaiApiKey.trim());
   const hasProfile = Boolean(
@@ -118,12 +120,7 @@ export const PopupApp: React.FC = () => {
                   hasAiAccess ? "text-slate-700" : "text-amber-800 font-medium"
                 }
               >
-                AI Engine:{" "}
-                {settings.useCustomApiKey
-                  ? settings.openaiApiKey.trim()
-                    ? "Custom API Key"
-                    : "Missing Custom Key"
-                  : "Cloud Plan Ready"}
+                Plan: {planStatus.planLabel}
               </span>
             </div>
 

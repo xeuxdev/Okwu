@@ -31,7 +31,14 @@ export interface JobTargetSettings {
   customTalkingPoint: string;
 }
 
-export type PlanTier = 'free_cloud' | 'pro_subscription' | 'byok';
+export type PlanTier = 'free_trial' | 'pro_subscription' | 'byok' | 'free_cloud';
+
+export interface UsageStats {
+  messagesUsedThisMonth: number;
+  currentBillingMonth: string;
+  proSubscribed: boolean;
+  proSubscribedAt?: string;
+}
 
 export interface CareerMilestone {
   company: string;
@@ -89,6 +96,28 @@ export interface ExtensionSettings {
   jobTargetSettings: JobTargetSettings;
   autoInjectButton: boolean;
   autoFillNote: boolean;
+  usageStats?: UsageStats;
+}
+
+export interface TargetExperience {
+  title: string;
+  company: string;
+  timeframe?: string;
+  description?: string;
+}
+
+export interface TargetEducation {
+  school: string;
+  degree?: string;
+  fieldOfStudy?: string;
+  timeframe?: string;
+}
+
+export interface TargetFeaturedItem {
+  title: string;
+  category?: string;
+  description?: string;
+  link?: string;
 }
 
 export interface TargetProfileData {
@@ -98,6 +127,10 @@ export interface TargetProfileData {
   location: string;
   aboutExcerpt: string;
   recentActivity: string;
+  recentPost?: string;
+  featuredItems?: TargetFeaturedItem[];
+  experiences?: TargetExperience[];
+  education?: TargetEducation[];
   profileUrl: string;
 }
 
@@ -114,6 +147,8 @@ export interface GenerateDraftResponse {
   characterCount?: number;
   planUsed?: string;
   matchedHighlight?: string;
+  messagesRemaining?: number;
+  monthlyLimitReached?: boolean;
 }
 
 export interface ParseResumeResponse {
@@ -136,7 +171,8 @@ export type ExtensionMessageType =
   | { type: 'TEST_OPENAI_KEY'; payload: { apiKey: string; model: string } }
   | { type: 'GET_SETTINGS' }
   | { type: 'SAVE_SETTINGS'; payload: ExtensionSettings }
-  | { type: 'OPEN_OPTIONS_PAGE' };
+  | { type: 'OPEN_OPTIONS_PAGE' }
+  | { type: 'SET_PLAN_TIER'; payload: { tier: PlanTier; activatePro?: boolean } };
 
 export interface ExtensionMessageResponse<T = unknown> {
   success: boolean;

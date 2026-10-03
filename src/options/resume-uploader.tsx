@@ -22,6 +22,7 @@ import {
   UserProfile,
   BaseFactSheet,
   LinkedInSelfProfile,
+  ExtensionMessageResponse,
 } from "../types/extension-types";
 
 interface ResumeUploaderProps {
@@ -146,12 +147,77 @@ export const ResumeUploader: React.FC<ResumeUploaderProps> = ({
           }
         : undefined);
 
-    const res = await parseResumeToBaseFactSheet(
-      rawText,
-      apiKey,
-      model,
-      activeLinkedInProfile,
-    );
+    let res: {
+      success: boolean;
+      profile?: UserProfile;
+      baseFactSheet?: BaseFactSheet;
+      error?: string;
+    };
+
+    if (
+      typeof chrome !== "undefined" &&
+      chrome.runtime &&
+      chrome.runtime.sendMessage
+    ) {
+      try {
+        const bgRes = await new Promise<
+          ExtensionMessageResponse<{
+            profile?: UserProfile;
+            baseFactSheet?: BaseFactSheet;
+          }>
+        >((resolve) => {
+          chrome.runtime.sendMessage(
+            {
+              type: "PARSE_RESUME_TO_FACT_SHEET",
+              payload: {
+                rawText,
+                linkedInProfile: activeLinkedInProfile,
+              },
+            },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                resolve({
+                  success: false,
+                  error: chrome.runtime.lastError.message,
+                });
+              } else {
+                resolve(response);
+              }
+            },
+          );
+        });
+
+        if (bgRes && bgRes.success && bgRes.data) {
+          res = {
+            success: true,
+            profile: bgRes.data.profile,
+            baseFactSheet: bgRes.data.baseFactSheet,
+          };
+        } else {
+          // If background worker had an issue, fallback to direct parse
+          res = await parseResumeToBaseFactSheet(
+            rawText,
+            apiKey,
+            model,
+            activeLinkedInProfile,
+          );
+        }
+      } catch {
+        res = await parseResumeToBaseFactSheet(
+          rawText,
+          apiKey,
+          model,
+          activeLinkedInProfile,
+        );
+      }
+    } else {
+      res = await parseResumeToBaseFactSheet(
+        rawText,
+        apiKey,
+        model,
+        activeLinkedInProfile,
+      );
+    }
 
     setIsParsing(false);
 

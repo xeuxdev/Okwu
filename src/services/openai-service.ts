@@ -9,8 +9,8 @@ import {
   BaseFactSheet,
   CareerMilestone,
   TechStackCategory,
-  LinkedInSelfProfile
-} from '../types/extension-types';
+  LinkedInSelfProfile,
+} from "../types/extension-types";
 
 interface OpenAiChatCompletionResponse {
   id: string;
@@ -59,82 +59,84 @@ interface ParsedBaseFactSheetJson {
 export function resolveEffectiveApiKeyAndModel(
   customApiKey: string,
   customModel: string,
-  useCustomApiKey: boolean
-): { apiKey: string; model: string; source: 'custom' | 'cloud' } {
+  useCustomApiKey: boolean,
+): { apiKey: string; model: string; source: "custom" | "cloud" } {
   if (useCustomApiKey && customApiKey.trim()) {
     return {
       apiKey: customApiKey.trim(),
-      model: customModel.trim() || 'gpt-4o-mini',
-      source: 'custom'
+      model: customModel.trim() || "gpt-6-luna",
+      source: "custom",
     };
   }
 
   // Check default cloud key embedded at build time
-  const cloudKey = typeof __DEFAULT_OPENAI_KEY__ !== 'undefined' ? __DEFAULT_OPENAI_KEY__.trim() : '';
+  const cloudKey =
+    typeof __DEFAULT_OPENAI_KEY__ !== "undefined"
+      ? __DEFAULT_OPENAI_KEY__.trim()
+      : "";
   const cloudModel =
-    typeof __DEFAULT_OPENAI_MODEL__ !== 'undefined' && __DEFAULT_OPENAI_MODEL__.trim()
+    typeof __DEFAULT_OPENAI_MODEL__ !== "undefined" &&
+    __DEFAULT_OPENAI_MODEL__.trim()
       ? __DEFAULT_OPENAI_MODEL__.trim()
-      : 'gpt-4o-mini';
+      : "gpt-6-luna";
 
   if (cloudKey) {
     return {
       apiKey: cloudKey,
       model: cloudModel,
-      source: 'cloud'
+      source: "cloud",
     };
   }
 
   if (customApiKey.trim()) {
     return {
       apiKey: customApiKey.trim(),
-      model: customModel.trim() || 'gpt-4o-mini',
-      source: 'custom'
+      model: customModel.trim() || "gpt-6-luna",
+      source: "custom",
     };
   }
 
   return {
-    apiKey: '',
-    model: cloudModel || 'gpt-4o-mini',
-    source: 'cloud'
+    apiKey: "",
+    model: cloudModel || "gpt-6-luna",
+    source: "cloud",
   };
 }
 
 export async function testOpenAiApiKey(
   apiKey: string,
-  model: string = 'gpt-4o-mini'
+  model: string = "gpt-6-luna",
 ): Promise<TestConnectionResponse> {
   const cleanKey = apiKey.trim();
   if (!cleanKey) {
-    return { success: false, error: 'API key is required.' };
+    return { success: false, error: "API key is required." };
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cleanKey}`
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: model || 'gpt-4o-mini',
-        messages: [
-          { role: 'user', content: 'Say "OK"' }
-        ],
-        max_tokens: 5,
-        temperature: 0
-      })
+        model: model || "gpt-6-luna",
+        messages: [{ role: "user", content: 'Say "OK"' }],
+        max_completion_tokens: 1000,
+      }),
     });
 
     const data = (await response.json()) as OpenAiChatCompletionResponse;
 
     if (!response.ok) {
-      const errorMsg = data.error?.message || `OpenAI API returned HTTP ${response.status}`;
+      const errorMsg =
+        data.error?.message || `OpenAI API returned HTTP ${response.status}`;
       return { success: false, error: errorMsg };
     }
 
-    return { success: true, modelUsed: model || 'gpt-4o-mini' };
+    return { success: true, modelUsed: model || "gpt-6-luna" };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Network error';
+    const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: `Failed to connect to OpenAI: ${message}` };
   }
 }
@@ -145,13 +147,23 @@ export async function testOpenAiApiKey(
  */
 export async function parseResumeToBaseFactSheet(
   rawResumeText: string,
-  apiKey: string,
-  model: string = 'gpt-4o-mini',
-  linkedInProfile?: LinkedInSelfProfile
+  apiKey: string = "",
+  model: string = "gpt-6-luna",
+  linkedInProfile?: LinkedInSelfProfile,
 ): Promise<ParseResumeResponse> {
-  const cleanKey = apiKey.trim();
+  const resolved = resolveEffectiveApiKeyAndModel(
+    apiKey,
+    model,
+    Boolean(apiKey.trim()),
+  );
+  const cleanKey = resolved.apiKey || apiKey.trim();
+  const effectiveModel = resolved.model || model || "gpt-6-luna";
+
   if (!cleanKey) {
-    return { success: false, error: 'AI key or Cloud plan is not available. Please check settings.' };
+    return {
+      success: false,
+      error: "AI key or Cloud plan is not available. Please check settings.",
+    };
   }
 
   const systemPrompt = `You are a master career analyst. Your task is to extract a comprehensive, high-density structured Base Fact Sheet from the candidate's complete resume and optional LinkedIn data.
@@ -211,89 +223,139 @@ Headline: ${linkedInProfile.headline}
 Current Role: ${linkedInProfile.currentRole}
 Location: ${linkedInProfile.location}
 Vanity URL: ${linkedInProfile.vanityUrl}`
-    : '';
+    : "";
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cleanKey}`
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: model || 'gpt-4o-mini',
-        response_format: { type: 'json_object' },
+        model: effectiveModel || "gpt-6-luna",
+        response_format: { type: "json_object" },
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: "system", content: systemPrompt },
           {
-            role: 'user',
-            content: `Here is the candidate's complete resume text:\n\n${rawResumeText.slice(0, 16000)}${linkedInContext}`
-          }
+            role: "user",
+            content: `Here is the candidate's complete resume text:\n\n${rawResumeText.slice(0, 16000)}${linkedInContext}`,
+          },
         ],
-        temperature: 0.2,
-        max_tokens: 2200
-      })
+        max_completion_tokens: 16000,
+      }),
     });
 
     const data = (await response.json()) as OpenAiChatCompletionResponse;
 
     if (!response.ok) {
-      const errorMsg = data.error?.message || `OpenAI API returned HTTP ${response.status}`;
+      const errorMsg =
+        data.error?.message || `OpenAI API returned HTTP ${response.status}`;
       return { success: false, error: errorMsg };
     }
 
-    const content = data.choices[0]?.message?.content;
+    const choice = data.choices[0];
+    const content = choice?.message?.content;
     if (!content) {
-      return { success: false, error: 'OpenAI returned an empty response.' };
+      if (choice?.finish_reason === "length") {
+        return {
+          success: false,
+          error:
+            "OpenAI token limit was exhausted during internal reasoning (finish_reason: length). Please try re-parsing again.",
+        };
+      }
+      return { success: false, error: "OpenAI returned an empty response." };
     }
 
     const parsedJson = JSON.parse(content) as ParsedBaseFactSheetJson;
 
     const identity = {
-      fullName: (linkedInProfile?.fullName || parsedJson.identity?.fullName || '').trim(),
-      headline: (linkedInProfile?.headline || parsedJson.identity?.headline || '').trim(),
-      currentRole: (linkedInProfile?.currentRole || parsedJson.identity?.currentRole || '').trim(),
-      currentCompany: (linkedInProfile?.currentCompany || parsedJson.identity?.currentCompany || '').trim(),
+      fullName: (
+        linkedInProfile?.fullName ||
+        parsedJson.identity?.fullName ||
+        ""
+      ).trim(),
+      headline: (
+        linkedInProfile?.headline ||
+        parsedJson.identity?.headline ||
+        ""
+      ).trim(),
+      currentRole: (
+        linkedInProfile?.currentRole ||
+        parsedJson.identity?.currentRole ||
+        ""
+      ).trim(),
+      currentCompany: (
+        linkedInProfile?.currentCompany ||
+        parsedJson.identity?.currentCompany ||
+        ""
+      ).trim(),
       yearsOfExperience: Number(parsedJson.identity?.yearsOfExperience) || 0,
-      location: (linkedInProfile?.location || parsedJson.identity?.location || '').trim(),
+      location: (
+        linkedInProfile?.location ||
+        parsedJson.identity?.location ||
+        ""
+      ).trim(),
       targetRoles: Array.isArray(parsedJson.identity?.targetRoles)
-        ? parsedJson.identity.targetRoles.map((r) => String(r).trim()).filter(Boolean)
-        : []
+        ? parsedJson.identity.targetRoles
+            .map((r) => String(r).trim())
+            .filter(Boolean)
+        : [],
     };
 
     const techStack: TechStackCategory = {
       languages: Array.isArray(parsedJson.techStack?.languages)
-        ? parsedJson.techStack.languages.map((s) => String(s).trim()).filter(Boolean)
+        ? parsedJson.techStack.languages
+            .map((s) => String(s).trim())
+            .filter(Boolean)
         : [],
       frameworks: Array.isArray(parsedJson.techStack?.frameworks)
-        ? parsedJson.techStack.frameworks.map((s) => String(s).trim()).filter(Boolean)
+        ? parsedJson.techStack.frameworks
+            .map((s) => String(s).trim())
+            .filter(Boolean)
         : [],
       toolsAndInfra: Array.isArray(parsedJson.techStack?.toolsAndInfra)
-        ? parsedJson.techStack.toolsAndInfra.map((s) => String(s).trim()).filter(Boolean)
+        ? parsedJson.techStack.toolsAndInfra
+            .map((s) => String(s).trim())
+            .filter(Boolean)
         : [],
       specializations: Array.isArray(parsedJson.techStack?.specializations)
-        ? parsedJson.techStack.specializations.map((s) => String(s).trim()).filter(Boolean)
-        : []
+        ? parsedJson.techStack.specializations
+            .map((s) => String(s).trim())
+            .filter(Boolean)
+        : [],
     };
 
-    const careerMilestones: CareerMilestone[] = Array.isArray(parsedJson.careerMilestones)
+    const careerMilestones: CareerMilestone[] = Array.isArray(
+      parsedJson.careerMilestones,
+    )
       ? parsedJson.careerMilestones.map((m) => ({
-          company: String(m.company || '').trim(),
-          role: String(m.role || '').trim(),
-          timeframe: String(m.timeframe || '').trim(),
-          keyImpact: String(m.keyImpact || '').replace(/[\u2014\u2013]/g, '-').trim(),
-          domain: String(m.domain || '').trim(),
+          company: String(m.company || "").trim(),
+          role: String(m.role || "").trim(),
+          timeframe: String(m.timeframe || "").trim(),
+          keyImpact: String(m.keyImpact || "")
+            .replace(/[\u2014\u2013]/g, "-")
+            .trim(),
+          domain: String(m.domain || "").trim(),
           technologies: Array.isArray(m.technologies)
             ? m.technologies.map((t) => String(t).trim()).filter(Boolean)
-            : []
+            : [],
         }))
       : [];
 
     const conversationHooks = Array.isArray(parsedJson.conversationHooks)
-      ? parsedJson.conversationHooks.map((h) => String(h).replace(/[\u2014\u2013]/g, '-').trim()).filter(Boolean)
+      ? parsedJson.conversationHooks
+          .map((h) =>
+            String(h)
+              .replace(/[\u2014\u2013]/g, "-")
+              .trim(),
+          )
+          .filter(Boolean)
       : [];
 
-    const compactBio = (parsedJson.compactBio || '').replace(/[\u2014\u2013]/g, '-').trim();
+    const compactBio = (parsedJson.compactBio || "")
+      .replace(/[\u2014\u2013]/g, "-")
+      .trim();
 
     const baseFactSheet: BaseFactSheet = {
       identity,
@@ -302,7 +364,7 @@ Vanity URL: ${linkedInProfile.vanityUrl}`
       conversationHooks,
       compactBio,
       linkedInSyncedAt: linkedInProfile ? new Date().toISOString() : undefined,
-      resumeParsedAt: new Date().toISOString()
+      resumeParsedAt: new Date().toISOString(),
     };
 
     // Also derive backwards-compatible UserProfile
@@ -310,24 +372,29 @@ Vanity URL: ${linkedInProfile.vanityUrl}`
       ...techStack.languages,
       ...techStack.frameworks,
       ...techStack.toolsAndInfra,
-      ...techStack.specializations
+      ...techStack.specializations,
     ];
 
     const profile: UserProfile = {
       fullName: identity.fullName,
       currentRole: identity.currentRole,
       skills: allSkills.slice(0, 15),
-      experienceHighlights: careerMilestones.map((m) => `${m.role} at ${m.company}: ${m.keyImpact}`).slice(0, 5),
-      summary: compactBio || identity.headline
+      experienceHighlights: careerMilestones
+        .map((m) => `${m.role} at ${m.company}: ${m.keyImpact}`)
+        .slice(0, 5),
+      summary: compactBio || identity.headline,
     };
 
     return { success: true, profile, baseFactSheet };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown parsing error';
-    return { success: false, error: `Failed to parse resume into Base Fact Sheet: ${message}` };
+    const message =
+      err instanceof Error ? err.message : "Unknown parsing error";
+    return {
+      success: false,
+      error: `Failed to parse resume into Base Fact Sheet: ${message}`,
+    };
   }
 }
-
 
 /**
  * Dynamically selects the single most relevant milestone and tech overlap for the target person.
@@ -336,21 +403,38 @@ Vanity URL: ${linkedInProfile.vanityUrl}`
 export function selectRelevantFactsForTarget(
   baseFactSheet: BaseFactSheet,
   targetProfile: TargetProfileData,
-  jobTarget?: JobTargetSettings
+  jobTarget?: JobTargetSettings,
 ): {
   promptSnippet: string;
   matchedHighlight: string;
 } {
+  const expTokens = (targetProfile.experiences || [])
+    .map((e) => `${e.company} ${e.title} ${e.description || ""}`)
+    .join(" ");
+
+  const eduTokens = (targetProfile.education || [])
+    .map((ed) => `${ed.school} ${ed.degree || ""} ${ed.fieldOfStudy || ""}`)
+    .join(" ");
+
+  const featTokens = (targetProfile.featuredItems || [])
+    .map((f) => `${f.title} ${f.category || ""} ${f.description || ""}`)
+    .join(" ");
+
   const targetTokens = [
     targetProfile.companyOrRole,
     targetProfile.headline,
     targetProfile.aboutExcerpt,
+    targetProfile.recentPost,
+    targetProfile.recentActivity,
+    featTokens,
+    expTokens,
+    eduTokens,
     jobTarget?.targetCompany,
     jobTarget?.targetRole,
-    jobTarget?.customTalkingPoint
+    jobTarget?.customTalkingPoint,
   ]
     .filter(Boolean)
-    .join(' ')
+    .join(" ")
     .toLowerCase();
 
   // Find most relevant milestone
@@ -386,89 +470,111 @@ export function selectRelevantFactsForTarget(
     ...baseFactSheet.techStack.languages,
     ...baseFactSheet.techStack.frameworks,
     ...baseFactSheet.techStack.toolsAndInfra,
-    ...baseFactSheet.techStack.specializations
+    ...baseFactSheet.techStack.specializations,
   ];
 
   const matchedTech = allTech
     .filter((tech) => targetTokens.includes(tech.toLowerCase()))
     .slice(0, 4);
 
-  const fallbackTech = matchedTech.length > 0 ? matchedTech : allTech.slice(0, 4);
+  const fallbackTech =
+    matchedTech.length > 0 ? matchedTech : allTech.slice(0, 4);
 
   // Pick best conversation hook
   const matchedHook =
     baseFactSheet.conversationHooks.find((h) =>
-      targetTokens.split(/\s+/).some((token) => token.length > 3 && h.toLowerCase().includes(token))
-    ) || baseFactSheet.conversationHooks[0] || '';
+      targetTokens
+        .split(/\s+/)
+        .some((token) => token.length > 3 && h.toLowerCase().includes(token)),
+    ) ||
+    baseFactSheet.conversationHooks[0] ||
+    "";
 
   const matchedHighlight = bestMilestone
     ? `${bestMilestone.role} at ${bestMilestone.company}: ${bestMilestone.keyImpact}`
     : baseFactSheet.identity.currentRole;
 
   const promptSnippet = `RELEVANT SENDER GROUND TRUTH:
-Name: ${baseFactSheet.identity.fullName || 'Candidate'}
-Current: ${baseFactSheet.identity.currentRole || 'Specialist'}${baseFactSheet.identity.currentCompany ? ` at ${baseFactSheet.identity.currentCompany}` : ''}
+Name: ${baseFactSheet.identity.fullName || "Candidate"}
+Current: ${baseFactSheet.identity.currentRole || "Specialist"}${baseFactSheet.identity.currentCompany ? ` at ${baseFactSheet.identity.currentCompany}` : ""}
 Relevant Past Impact: ${matchedHighlight}
-Shared Tech / Domain: ${fallbackTech.join(', ')}${bestMilestone?.domain ? ` (${bestMilestone.domain})` : ''}
-${matchedHook ? `Key Talking Point: ${matchedHook}` : ''}`;
+Shared Tech / Domain: ${fallbackTech.join(", ")}${bestMilestone?.domain ? ` (${bestMilestone.domain})` : ""}
+${matchedHook ? `Key Talking Point: ${matchedHook}` : ""}`;
 
   return {
     promptSnippet,
-    matchedHighlight
+    matchedHighlight,
   };
 }
 
 export async function generateConnectionNote(
-  apiKey: string,
-  model: string = 'gpt-4o-mini',
+  apiKey: string = "",
+  model: string = "gpt-6-luna",
   userProfile: UserProfile,
   stylePreferences: StylePreferences,
   targetProfile: TargetProfileData,
   customPromptModifier?: string,
   jobTargetSettings?: JobTargetSettings,
-  baseFactSheet?: BaseFactSheet
+  baseFactSheet?: BaseFactSheet,
 ): Promise<GenerateDraftResponse> {
-  const cleanKey = apiKey.trim();
+  const resolved = resolveEffectiveApiKeyAndModel(
+    apiKey,
+    model,
+    Boolean(apiKey.trim()),
+  );
+  const cleanKey = resolved.apiKey || apiKey.trim();
+  const effectiveModel = resolved.model || model || "gpt-6-luna";
+
   if (!cleanKey) {
     return {
       success: false,
-      error: 'AI service is not configured. Please open Extension Settings to select a plan or enter an API key.'
+      error:
+        "AI service is not configured. Please open Extension Settings to select a plan or enter an API key.",
     };
   }
 
   const toneGuidelines: Record<string, string> = {
-    conversational: 'Warm, natural, peer-to-peer, friendly and polite without being stiff.',
-    professional: 'Polite, respectful, business-appropriate, and crisp.',
-    direct: 'Very concise, directly stating common ground or value, no filler words.',
-    enthusiastic: 'High energy, genuinely appreciative of their work or shared passion.'
+    conversational:
+      "Warm, natural, peer-to-peer, friendly and polite without being stiff.",
+    professional: "Polite, respectful, business-appropriate, and crisp.",
+    direct:
+      "Very concise, directly stating common ground or value, no filler words.",
+    enthusiastic:
+      "High energy, genuinely appreciative of their work or shared passion.",
   };
 
-  const selectedTone = toneGuidelines[stylePreferences.tone] || toneGuidelines.conversational;
+  const selectedTone =
+    toneGuidelines[stylePreferences.tone] || toneGuidelines.conversational;
 
   const isJobTargeting = Boolean(
-    jobTargetSettings?.enabled && jobTargetSettings.targetCompany
+    jobTargetSettings?.enabled && jobTargetSettings.targetCompany,
   );
 
-  let jobTargetPromptContext = '';
+  let jobTargetPromptContext = "";
   if (isJobTargeting && jobTargetSettings) {
     const statusLabels: Record<string, string> = {
-      applied: 'Applied for role (following up politely to meet future teammates)',
-      planning_to_apply: 'Planning to apply soon (seeking insider insights on culture/tech)',
-      dream_company: 'Dream target company (aiming to build a relationship first)'
+      applied:
+        "Applied for role (following up politely to meet future teammates)",
+      planning_to_apply:
+        "Planning to apply soon (seeking insider insights on culture/tech)",
+      dream_company:
+        "Dream target company (aiming to build a relationship first)",
     };
 
-    const statusText = statusLabels[jobTargetSettings.applicationStatus] || statusLabels.applied;
+    const statusText =
+      statusLabels[jobTargetSettings.applicationStatus] || statusLabels.applied;
 
     const hookDescriptions: Record<string, string> = {
       culture_question: `Ask a low-pressure, genuine question about team engineering culture, shipping pace, or developer experience at ${jobTargetSettings.targetCompany}.`,
-      tech_discussion: `Ask an engaging technical question about how their team tackles challenges${jobTargetSettings.customTalkingPoint ? ` with ${jobTargetSettings.customTalkingPoint}` : ' in their stack'}.`,
+      tech_discussion: `Ask an engaging technical question about how their team tackles challenges${jobTargetSettings.customTalkingPoint ? ` with ${jobTargetSettings.customTalkingPoint}` : " in their stack"}.`,
       project_appreciation: `Compliment an impressive product launch or initiative at ${jobTargetSettings.targetCompany} and ask an open-ended question about what they learned building it.`,
-      applied_conversation: `Mention you submitted an application for ${jobTargetSettings.targetRole || 'the role'} at ${jobTargetSettings.targetCompany}, connect peer-to-peer, and ask what they like most about the team.`,
-      direct_inquiry: `Direct, polite message expressing mutual domain focus for ${jobTargetSettings.targetRole || 'the role'} at ${jobTargetSettings.targetCompany}, asking a quick question on what skills their team values most.`
+      applied_conversation: `Mention you submitted an application for ${jobTargetSettings.targetRole || "the role"} at ${jobTargetSettings.targetCompany}, connect peer-to-peer, and ask what they like most about the team.`,
+      direct_inquiry: `Direct, polite message expressing mutual domain focus for ${jobTargetSettings.targetRole || "the role"} at ${jobTargetSettings.targetCompany}, asking a quick question on what skills their team values most.`,
     };
 
     const hookInstruction =
-      hookDescriptions[jobTargetSettings.conversationHook] || hookDescriptions.culture_question;
+      hookDescriptions[jobTargetSettings.conversationHook] ||
+      hookDescriptions.culture_question;
 
     jobTargetPromptContext = `
 TARGET COMPANY NETWORKING MODE:
@@ -476,7 +582,7 @@ Target Company: ${jobTargetSettings.targetCompany}
 Target Role: ${jobTargetSettings.targetRole || userProfile.currentRole}
 Application Status: ${statusText}
 Conversation Starter Strategy: ${hookInstruction}
-${jobTargetSettings.customTalkingPoint ? `Custom Topic/Context: ${jobTargetSettings.customTalkingPoint}` : ''}
+${jobTargetSettings.customTalkingPoint ? `Custom Topic/Context: ${jobTargetSettings.customTalkingPoint}` : ""}
 
 PRIMARY OBJECTIVE:
 Your goal is to connect with employees at this target company in a way that turns into a real two-way conversation and improves employment chances.
@@ -492,7 +598,7 @@ CRITICAL HARD CONSTRAINTS:
 1. The note MUST be strictly under 200 characters total (absolute maximum). Aim for 140-185 characters. Never exceed 200 characters.
 2. Tone: ${selectedTone}
 3. Address the person by their first name if discernible.
-4. Reference a specific detail from their headline, current company, role, or background to demonstrate genuine relevance.
+4. High-impact personalization: Prioritize referencing a concrete detail from their recent post (e.g. project launch, scholarship announcement, thoughts shared), featured project, current research, or school milestone to demonstrate genuine peer engagement and shared domain interest.
 5. Create an open conversational loop: end with a natural, low-pressure question or thought that makes them want to reply.
 6. Absolutely DO NOT sound transactional or use generic clichés:
    - Never say "I would love to pick your brain"
@@ -503,64 +609,110 @@ CRITICAL HARD CONSTRAINTS:
 7. Never use em dashes. Use commas, hyphens, or periods instead.
 8. Output ONLY the raw message text. No quotes, no markdown headers, no introductory text like "Here is your note:".`;
 
-  let senderContext = '';
-  let matchedHighlight = '';
+  let senderContext = "";
+  let matchedHighlight = "";
 
-  if (baseFactSheet && (baseFactSheet.careerMilestones.length > 0 || baseFactSheet.compactBio)) {
-    const matched = selectRelevantFactsForTarget(baseFactSheet, targetProfile, jobTargetSettings);
+  if (
+    baseFactSheet &&
+    (baseFactSheet.careerMilestones.length > 0 || baseFactSheet.compactBio)
+  ) {
+    const matched = selectRelevantFactsForTarget(
+      baseFactSheet,
+      targetProfile,
+      jobTargetSettings,
+    );
     senderContext = matched.promptSnippet;
     matchedHighlight = matched.matchedHighlight;
   } else {
     senderContext = `SENDER INFO:
-Name: ${userProfile.fullName || 'Professional'}
-Role: ${userProfile.currentRole || 'Specialist'}
-Skills: ${userProfile.skills.slice(0, 8).join(', ')}
-Key Highlight: ${userProfile.experienceHighlights[0] || userProfile.summary || ''}`;
+Name: ${userProfile.fullName || "Professional"}
+Role: ${userProfile.currentRole || "Specialist"}
+Skills: ${userProfile.skills.slice(0, 8).join(", ")}
+Key Highlight: ${userProfile.experienceHighlights[0] || userProfile.summary || ""}`;
   }
 
+  const expLines = (targetProfile.experiences || [])
+    .slice(0, 3)
+    .map(
+      (e) =>
+        `- ${e.title} at ${e.company}${e.timeframe ? ` (${e.timeframe})` : ""}${e.description ? `: ${e.description.slice(0, 100)}` : ""}`,
+    )
+    .join("\n");
+
+  const eduLines = (targetProfile.education || [])
+    .slice(0, 2)
+    .map(
+      (ed) =>
+        `- ${ed.school}${ed.degree ? `, ${ed.degree}` : ""}${ed.fieldOfStudy ? ` in ${ed.fieldOfStudy}` : ""}`,
+    )
+    .join("\n");
+
+  const featLines = (targetProfile.featuredItems || [])
+    .slice(0, 3)
+    .map(
+      (f) =>
+        `- ${f.title}${f.category ? ` (${f.category})` : ""}${f.description ? `: ${f.description.slice(0, 120)}` : ""}`,
+    )
+    .join("\n");
+
+  const recentContent =
+    targetProfile.recentPost || targetProfile.recentActivity;
+
   const targetContext = `TARGET PERSON:
-Name: ${targetProfile.fullName || 'there'}
-Headline: ${targetProfile.headline || 'Professional'}
-Company / Role: ${targetProfile.companyOrRole || 'Industry Leader'}
-Location: ${targetProfile.location || ''}
-About Excerpt: ${targetProfile.aboutExcerpt ? targetProfile.aboutExcerpt.slice(0, 300) : 'N/A'}
-Recent Activity Snippet: ${targetProfile.recentActivity ? targetProfile.recentActivity.slice(0, 200) : 'N/A'}`;
+Name: ${targetProfile.fullName || "there"}
+Headline: ${targetProfile.headline || "Professional"}
+Current Role / Org: ${targetProfile.companyOrRole || "Industry Leader"}
+Location: ${targetProfile.location || "N/A"}
+${targetProfile.aboutExcerpt ? `About Summary: ${targetProfile.aboutExcerpt.slice(0, 300)}` : ""}
+${featLines ? `Featured Projects / Portfolio:\n${featLines}` : ""}
+${expLines ? `Work History / Experiences:\n${expLines}` : ""}
+${eduLines ? `Education Background:\n${eduLines}` : ""}
+${recentContent ? `Recent Post / Shared Insight: "${recentContent.slice(0, 250)}"` : ""}`;
 
   const userInstructions = `ADDITIONAL PREFERENCES:
-Custom instructions: ${stylePreferences.customInstructions || 'None'}
-Things to avoid: ${stylePreferences.thingsToAvoid || 'Generic templates'}
-Sample note the sender likes: ${stylePreferences.sampleNote || 'None'}
+Custom instructions: ${stylePreferences.customInstructions || "None"}
+Things to avoid: ${stylePreferences.thingsToAvoid || "Generic templates"}
+Sample note the sender likes: ${stylePreferences.sampleNote || "None"}
 ${jobTargetPromptContext}
-${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ''}`;
+${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
 
   const promptContent = `${senderContext}\n\n${targetContext}\n\n${userInstructions}\n\nWrite a personalized connection request note under 200 characters:`;
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cleanKey}`
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: model || 'gpt-4o-mini',
+        model: effectiveModel || "gpt-6-luna",
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: promptContent }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: promptContent },
         ],
-        temperature: 0.7,
-        max_tokens: 150
-      })
+        max_completion_tokens: 4000,
+      }),
     });
 
     const data = (await response.json()) as OpenAiChatCompletionResponse;
 
     if (!response.ok) {
-      const errorMsg = data.error?.message || `OpenAI API returned HTTP ${response.status}`;
+      const errorMsg =
+        data.error?.message || `OpenAI API returned HTTP ${response.status}`;
       return { success: false, error: errorMsg };
     }
 
-    let draftText = data.choices[0]?.message?.content?.trim() || '';
+    const choice = data.choices[0];
+    let draftText = choice?.message?.content?.trim() || "";
+
+    if (!draftText && choice?.finish_reason === "length") {
+      return {
+        success: false,
+        error:
+          "OpenAI token limit was reached during reasoning before generating the note.",
+      };
+    }
 
     // Remove quotes if the LLM wrapped the text in quotes
     if (
@@ -571,17 +723,18 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ''}`;
     }
 
     // Clean up any em dashes (Rule 9)
-    draftText = draftText.replace(/[\u2014\u2013]/g, '-');
+    draftText = draftText.replace(/[\u2014\u2013]/g, "-");
 
     // If draft exceeds 200 characters, truncate cleanly to nearest sentence or word boundary under 200 characters
     if (draftText.length > 200) {
       const truncated = draftText.slice(0, 196);
-      const lastPeriod = truncated.lastIndexOf('.');
+      const lastPeriod = truncated.lastIndexOf(".");
       if (lastPeriod > 120) {
         draftText = truncated.slice(0, lastPeriod + 1);
       } else {
-        const lastSpace = truncated.lastIndexOf(' ');
-        draftText = (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + '...';
+        const lastSpace = truncated.lastIndexOf(" ");
+        draftText =
+          (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + "...";
       }
     }
 
@@ -589,10 +742,10 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ''}`;
       success: true,
       draftText,
       characterCount: draftText.length,
-      matchedHighlight: matchedHighlight || undefined
+      matchedHighlight: matchedHighlight || undefined,
     };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Network error';
+    const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: `OpenAI connection failed: ${message}` };
   }
 }

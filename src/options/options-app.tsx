@@ -5,6 +5,9 @@ import {
   CheckCircle2,
   AlertCircle,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Sliders,
 } from "lucide-react";
 import {
   ExtensionSettings,
@@ -29,6 +32,7 @@ export const OptionsApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [saveBanner, setSaveBanner] = useState<{
     type: "success" | "error";
     text: string;
@@ -232,6 +236,8 @@ export const OptionsApp: React.FC = () => {
             model={settings.openaiModel}
             useCustomApiKey={settings.useCustomApiKey}
             planTier={settings.planTier}
+            messagesUsedThisMonth={settings.usageStats?.messagesUsedThisMonth ?? 0}
+            proSubscribed={Boolean(settings.usageStats?.proSubscribed || settings.planTier === "pro_subscription")}
             onApiKeyChange={handleApiKeyChange}
             onModelChange={handleModelChange}
             onUseCustomApiKeyChange={(useCustomApiKey) =>
@@ -253,23 +259,58 @@ export const OptionsApp: React.FC = () => {
             onLinkedInProfileSynced={handleLinkedInSynced}
           />
 
-          {/* 3. Structured Profile */}
-          <ProfileEditor
-            profile={settings.userProfile}
-            onChange={handleProfileChange}
-          />
+          {/* Optional Advanced Customization Section */}
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full flex items-center justify-between text-left focus:outline-none"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                  <Sliders className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Advanced Customization (Optional)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Customize tone, target companies, banned phrases, and candidate profile details.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600">
+                <span>{showAdvanced ? "Hide" : "Customize"}</span>
+                {showAdvanced ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </div>
+            </button>
 
-          {/* 4. Style & Tone Preferences */}
-          <StylePreferencesComponent
-            preferences={settings.stylePreferences}
-            onChange={handleStyleChange}
-          />
+            {showAdvanced && (
+              <div className="mt-6 space-y-6 pt-6 border-t border-slate-100">
+                {/* 3. Structured Profile */}
+                <ProfileEditor
+                  profile={settings.userProfile}
+                  onChange={handleProfileChange}
+                />
 
-          {/* 5. Target Company & Job Application Mode */}
-          <JobTargetConfig
-            settings={settings.jobTargetSettings}
-            onChange={handleJobTargetChange}
-          />
+                {/* 4. Style & Tone Preferences */}
+                <StylePreferencesComponent
+                  preferences={settings.stylePreferences}
+                  onChange={handleStyleChange}
+                />
+
+                {/* 5. Target Company & Job Application Mode */}
+                <JobTargetConfig
+                  settings={settings.jobTargetSettings}
+                  onChange={handleJobTargetChange}
+                />
+              </div>
+            )}
+          </div>
 
           {/* Footer actions */}
           <div className="flex items-center justify-between pt-4 border-t border-slate-200">

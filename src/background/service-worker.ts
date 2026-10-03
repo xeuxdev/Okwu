@@ -14,6 +14,13 @@ import {
   resolveEffectiveApiKeyAndModel
 } from '../services/openai-service';
 import { syncLinkedInProfileFromBrowser } from '../services/linkedin-sync-service';
+import {
+  getPlanStatus,
+  recordMessageUsage,
+  activateProSubscription,
+  switchToByok,
+  switchToFreeTrial
+} from '../services/plan-service';
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
@@ -49,7 +56,22 @@ async function handleMessage(
   switch (message.type) {
     case 'GENERATE_DRAFT': {
       const settings = await getSettings();
-      const { apiKey, model, source } = resolveEffectiveApiKeyAndModel(
+      const planStatus = getPlanStatus(settings);
+
+      if (!planStatus.canGenerate) {
+        return {
+          success: false,
+          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings for unlimited notes.',
+          data: {
+            success: false,
+            error: 'Monthly free trial limit reached (3/3 notes used this month).',
+            monthlyLimitReached: true,
+            messagesRemaining: 0
+          } as GenerateDraftResponse
+        };
+      }
+
+      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
         settings.openaiApiKey,
         settings.openaiModel,
         settings.useCustomApiKey
@@ -85,7 +107,13 @@ async function handleMessage(
         };
       }
 
-      draftResult.planUsed = source === 'custom' ? 'BYOK Key' : 'Cloud AI';
+      // Record message usage and save settings
+      const updatedSettings = recordMessageUsage(settings);
+      await saveSettings(updatedSettings);
+
+      const updatedStatus = getPlanStatus(updatedSettings);
+      draftResult.planUsed = planStatus.planLabel;
+      draftResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
 
       return {
         success: true,
@@ -211,6 +239,22 @@ async function handleMessage(
       }
       return {
         success: true
+      };
+    }
+
+    case 'SET_PLAN_TIER': {
+      let settings = await getSettings();
+      if (message.payload.activatePro || message.payload.tier === 'pro_subscription') {
+        settings = activateProSubscription(settings);
+      } else if (message.payload.tier === 'byok') {
+        settings = switchToByok(settings);
+      } else {
+        settings = switchToFreeTrial(settings);
+      }
+      await saveSettings(settings);
+      return {
+        success: true,
+        data: settings
       };
     }
 

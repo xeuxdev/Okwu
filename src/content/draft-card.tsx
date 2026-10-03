@@ -20,6 +20,7 @@ import {
   JobTargetSettings,
   ConversationHookType,
 } from "../types/extension-types";
+import { getPlanStatus } from "../services/plan-service";
 import { insertNoteIntoLinkedIn } from "./note-injector";
 
 interface DraftCardProps {
@@ -50,6 +51,8 @@ export const DraftCard: React.FC<DraftCardProps> = ({
     customTalkingPoint: "",
   });
   const [isEditingTarget, setIsEditingTarget] = useState<boolean>(false);
+  const [monthlyLimitReached, setMonthlyLimitReached] =
+    useState<boolean>(false);
 
   // Check configuration on mount
   useEffect(() => {
@@ -66,7 +69,8 @@ export const DraftCard: React.FC<DraftCardProps> = ({
             return;
           }
 
-          setPlanBadge(settings.useCustomApiKey ? "BYOK Key" : "Cloud AI");
+          const status = getPlanStatus(settings);
+          setPlanBadge(status.planLabel);
 
           // Initialize job target from settings or inferred from profile
           const initialJobTarget: JobTargetSettings = {
@@ -117,6 +121,7 @@ export const DraftCard: React.FC<DraftCardProps> = ({
         setIsLoading(false);
         if (response && response.success && response.data?.draftText) {
           setDraftText(response.data.draftText);
+          setMonthlyLimitReached(false);
           if (response.data.planUsed) {
             setPlanBadge(response.data.planUsed);
           }
@@ -128,7 +133,26 @@ export const DraftCard: React.FC<DraftCardProps> = ({
             response?.error ||
               "Failed to generate connection note. Please check your settings.",
           );
+          if (response?.data?.monthlyLimitReached) {
+            setMonthlyLimitReached(true);
+          }
         }
+      },
+    );
+  };
+
+  const handleUpgradeToPro = () => {
+    setIsLoading(true);
+    chrome.runtime.sendMessage(
+      {
+        type: "SET_PLAN_TIER",
+        payload: { tier: "pro_subscription", activatePro: true },
+      },
+      () => {
+        setMonthlyLimitReached(false);
+        setErrorMessage(null);
+        setPlanBadge("Pro Unlimited ($5/mo)");
+        handleGenerateDraft();
       },
     );
   };
@@ -234,17 +258,39 @@ export const DraftCard: React.FC<DraftCardProps> = ({
       </div>
 
       {/* Target Preview Details */}
-      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700 border border-slate-200">
-        <div className="font-semibold text-slate-900 truncate">
+      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-700 border border-slate-200 space-y-1.5">
+        <div className="font-semibold text-slate-900 text-sm truncate">
           {targetProfile.headline ||
             targetProfile.companyOrRole ||
             "Profile details extracted"}
         </div>
-        {targetProfile.location && (
-          <div className="text-xs text-slate-500 mt-0.5">
-            {targetProfile.location}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {targetProfile.location && (
+            <span className="rounded bg-slate-200/70 px-2 py-0.5 text-[11px] text-slate-600">
+              {targetProfile.location}
+            </span>
+          )}
+          {targetProfile.experiences && targetProfile.experiences.length > 0 && (
+            <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800">
+              {targetProfile.experiences[0].title}
+            </span>
+          )}
+          {targetProfile.education && targetProfile.education.length > 0 && (
+            <span className="rounded bg-slate-200/70 px-2 py-0.5 text-[11px] text-slate-700">
+              {targetProfile.education[0].school}
+            </span>
+          )}
+          {targetProfile.recentPost && (
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+              Recent post detected
+            </span>
+          )}
+          {targetProfile.featuredItems && targetProfile.featuredItems.length > 0 && (
+            <span className="rounded bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-800 truncate max-w-44">
+              Featured: {targetProfile.featuredItems[0].title}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Matched Ground Truth Fact */}
@@ -549,6 +595,48 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                   >
                     Domain Question
                   </button>
+                  {targetProfile.recentPost && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleGenerateDraft(
+                          "Directly reference and praise their recent post or shared insight with an engaging question under 180 characters.",
+                        )
+                      }
+                      disabled={isLoading}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50 transition-colors"
+                    >
+                      Recent Post
+                    </button>
+                  )}
+                  {targetProfile.featuredItems && targetProfile.featuredItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleGenerateDraft(
+                          `Reference their featured project "${targetProfile.featuredItems![0].title}" and ask an insightful technical question under 180 characters.`,
+                        )
+                      }
+                      disabled={isLoading}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50 transition-colors"
+                    >
+                      Featured Project
+                    </button>
+                  )}
+                  {targetProfile.experiences && targetProfile.experiences.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleGenerateDraft(
+                          `Reference their specific background as ${targetProfile.experiences![0].title} at ${targetProfile.experiences![0].company} under 180 characters.`,
+                        )
+                      }
+                      disabled={isLoading}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50 transition-colors"
+                    >
+                      Experience Angle
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() =>
@@ -581,9 +669,29 @@ export const DraftCard: React.FC<DraftCardProps> = ({
 
           {/* Error notice */}
           {errorMessage && (
-            <div className="mb-4 flex items-start gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
-              <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
-              <span className="leading-snug">{errorMessage}</span>
+            <div className="mb-4 flex flex-col gap-2 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+                <span className="leading-snug">{errorMessage}</span>
+              </div>
+              {monthlyLimitReached && (
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={handleUpgradeToPro}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    Upgrade to Pro ($5/mo)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openOptions}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                  >
+                    Configure BYOK in Settings
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
