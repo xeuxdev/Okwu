@@ -2,6 +2,7 @@ import {
   ExtensionMessageType,
   ExtensionMessageResponse,
   GenerateDraftResponse,
+  GenerateCommentResponse,
   ParseResumeResponse,
   TestConnectionResponse,
   ExtensionSettings
@@ -13,6 +14,7 @@ import {
   testOpenAiApiKey,
   resolveEffectiveApiKeyAndModel
 } from '../services/openai-service';
+import { generatePostComment } from '../services/comment-service';
 import { syncLinkedInProfileFromBrowser } from '../services/linkedin-sync-service';
 import {
   getPlanStatus,
@@ -31,18 +33,33 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onMessage.addListener(
   (
-    message: ExtensionMessageType,
+    message: unknown,
     _sender: chrome.runtime.MessageSender,
     sendResponse: (response: ExtensionMessageResponse<unknown>) => void
   ) => {
+    // Only handle messages structured for this extension
+    if (!message || typeof message !== 'object' || !('type' in message)) {
+      return false;
+    }
+
+    const extMessage = message as ExtensionMessageType;
+
     // Handle async message processing
-    handleMessage(message)
+    handleMessage(extMessage)
       .then((res) => {
-        sendResponse(res);
+        try {
+          sendResponse(res);
+        } catch {
+          // Channel might have closed
+        }
       })
       .catch((err: unknown) => {
         const errorMsg = err instanceof Error ? err.message : 'Unknown internal error';
-        sendResponse({ success: false, error: errorMsg });
+        try {
+          sendResponse({ success: false, error: errorMsg });
+        } catch {
+          // Channel might have closed
+        }
       });
 
     // Return true to signal asynchronous response in Chrome extensions
@@ -118,6 +135,68 @@ async function handleMessage(
       return {
         success: true,
         data: draftResult
+      };
+    }
+
+    case 'GENERATE_COMMENT': {
+      const settings = await getSettings();
+      const planStatus = getPlanStatus(settings);
+
+      if (!planStatus.canGenerate) {
+        return {
+          success: false,
+          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings.',
+          data: {
+            success: false,
+            error: 'Monthly limit reached (3/3 used this month).',
+            monthlyLimitReached: true,
+            messagesRemaining: 0
+          } as GenerateCommentResponse
+        };
+      }
+
+      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
+        settings.openaiApiKey,
+        settings.openaiModel,
+        settings.useCustomApiKey
+      );
+
+      if (!apiKey) {
+        return {
+          success: false,
+          error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
+        };
+      }
+
+      const commentResult: GenerateCommentResponse = await generatePostComment(
+        apiKey,
+        model,
+        settings.userProfile,
+        settings.stylePreferences,
+        message.payload.postContext,
+        message.payload.customPromptModifier,
+        settings.baseFactSheet,
+        message.payload.commentAngle
+      );
+
+      if (!commentResult.success) {
+        return {
+          success: false,
+          error: commentResult.error || 'Failed to generate comment.'
+        };
+      }
+
+      // Record usage and persist settings
+      const updatedSettings = recordMessageUsage(settings);
+      await saveSettings(updatedSettings);
+
+      const updatedStatus = getPlanStatus(updatedSettings);
+      commentResult.planUsed = planStatus.planLabel;
+      commentResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
+
+      return {
+        success: true,
+        data: commentResult
       };
     }
 

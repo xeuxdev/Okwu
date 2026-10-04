@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      emptyOutDir: true,
+      emptyOutDir: false,
       rollupOptions: {
         input: {
           popup: resolve(import.meta.dirname, 'popup.html'),

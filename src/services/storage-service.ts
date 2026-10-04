@@ -71,6 +71,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   jobTargetSettings: DEFAULT_JOB_TARGET_SETTINGS,
   autoInjectButton: true,
   autoFillNote: true,
+  autoFillComment: true,
   usageStats: DEFAULT_USAGE_STATS
 };
 

@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Sliders,
+  MessageSquare,
 } from "lucide-react";
 import {
   ExtensionSettings,
@@ -197,37 +198,70 @@ export const OptionsApp: React.FC = () => {
         {/* Main Content Sections */}
         <main className="space-y-6">
           {/* Instant Autofill Preference */}
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                <Sparkles className="h-4 w-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 shrink-0">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Auto-draft Connection Notes
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Automatically drafts and populates connection notes upon opening the modal.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Instant Autofill when Note Box Opens
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Automatically drafts and populates the LinkedIn note without
-                  requiring you to click the assistant button.
-                </p>
-              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer ml-3 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={settings.autoFillNote}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      autoFillNote: e.target.checked,
+                    }))
+                  }
+                  className="sr-only peer"
+                  aria-label="Toggle Instant Autofill for Notes"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+              </label>
             </div>
 
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.autoFillNote}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    autoFillNote: e.target.checked,
-                  }))
-                }
-                className="sr-only peer"
-                aria-label="Toggle Instant Autofill"
-              />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-            </label>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 shrink-0">
+                  <MessageSquare className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Auto-draft Unconventional Comments
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Automatically loads authentic, non-bot comments when opening comment boxes on feed and posts.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer ml-3 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={settings.autoFillComment}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      autoFillComment: e.target.checked,
+                    }))
+                  }
+                  className="sr-only peer"
+                  aria-label="Toggle Instant Autofill for Comments"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+              </label>
+            </div>
           </div>
 
           {/* 1. AI Plan & Engine Configuration */}

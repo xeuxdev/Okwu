@@ -96,6 +96,7 @@ export interface ExtensionSettings {
   jobTargetSettings: JobTargetSettings;
   autoInjectButton: boolean;
   autoFillNote: boolean;
+  autoFillComment: boolean;
   usageStats?: UsageStats;
 }
 
@@ -151,6 +152,44 @@ export interface GenerateDraftResponse {
   monthlyLimitReached?: boolean;
 }
 
+export interface ExistingComment {
+  author: string;
+  headline?: string;
+  text: string;
+}
+
+export interface PostContext {
+  postAuthorName: string;
+  postAuthorHeadline?: string;
+  postAuthorProfileUrl?: string;
+  postText: string;
+  existingComments?: ExistingComment[];
+  postUrn?: string;
+}
+
+export type CommentAnglePreference =
+  | 'tactical_question'
+  | 'counter_intuitive'
+  | 'grounded_peer'
+  | 'witty_perspective';
+
+export interface GenerateCommentRequest {
+  postContext: PostContext;
+  customPromptModifier?: string;
+  commentAngle?: CommentAnglePreference;
+}
+
+export interface GenerateCommentResponse {
+  success: boolean;
+  commentText?: string;
+  angleUsed?: string;
+  error?: string;
+  characterCount?: number;
+  planUsed?: string;
+  messagesRemaining?: number;
+  monthlyLimitReached?: boolean;
+}
+
 export interface ParseResumeResponse {
   success: boolean;
   profile?: UserProfile;
@@ -166,6 +205,7 @@ export interface TestConnectionResponse {
 
 export type ExtensionMessageType =
   | { type: 'GENERATE_DRAFT'; payload: GenerateDraftRequest }
+  | { type: 'GENERATE_COMMENT'; payload: GenerateCommentRequest }
   | { type: 'PARSE_RESUME_TO_FACT_SHEET'; payload: { rawText: string; linkedInProfile?: LinkedInSelfProfile } }
   | { type: 'SYNC_MY_LINKEDIN_PROFILE' }
   | { type: 'TEST_OPENAI_KEY'; payload: { apiKey: string; model: string } }
@@ -179,3 +219,4 @@ export interface ExtensionMessageResponse<T = unknown> {
   data?: T;
   error?: string;
 }
+

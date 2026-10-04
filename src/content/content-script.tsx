@@ -7,6 +7,7 @@ import {
   ExtensionSettings,
   GenerateDraftResponse
 } from '../types/extension-types';
+import { checkAndAutofillComments } from './comment-manager';
 
 let currentShadowHost: HTMLDivElement | null = null;
 let currentReactRoot: Root | null = null;
@@ -340,6 +341,7 @@ function removeAutofillToast() {
 }
 
 async function checkAndAutofillNote() {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
   if (!isLinkedInProfilePage()) return;
   if (isAutofilling) return;
 
@@ -485,7 +487,15 @@ function injectFloatingTrigger() {
   floatingTrigger = floating;
 }
 
+let commentPollInterval: ReturnType<typeof setInterval> | null = null;
+
 function updateInjection() {
+  // Comment checking runs across all LinkedIn pages (feed, posts, profile activity)
+  if (!commentPollInterval) {
+    commentPollInterval = setInterval(checkAndAutofillComments, 600);
+  }
+  checkAndAutofillComments();
+
   if (isLinkedInProfilePage()) {
     injectProfileButton();
     if (!floatingTrigger) {
@@ -494,7 +504,7 @@ function updateInjection() {
       floatingTrigger.style.display = 'flex';
     }
 
-    // Start background watcher for instant autofill
+    // Start background watcher for instant autofill of connection notes
     if (!autofillPollInterval) {
       autofillPollInterval = setInterval(checkAndAutofillNote, 450);
     }
@@ -517,7 +527,7 @@ function updateInjection() {
 // Initial run
 updateInjection();
 
-// Observe DOM mutations to handle client-side route transitions and modal opens
+// Observe DOM mutations to handle client-side route transitions, modal opens, and comment box expansions
 let lastUrl = window.location.href;
 const observer = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
@@ -530,9 +540,13 @@ const observer = new MutationObserver(() => {
     // Check if modal opened on mutation
     checkAndAutofillNote();
   }
+
+  // Check if a comment box opened or expanded
+  checkAndAutofillComments();
 });
 
 observer.observe(document.body, {
   childList: true,
   subtree: true
 });
+
