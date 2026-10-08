@@ -159,8 +159,8 @@ export async function triggerCommentGeneration(
   // Update injected toolbar button if present
   updateToolbarButtonState(editor, true);
 
-  // Show the user: spinner and "Generating unconventional comment..."
-  showCommentToast('Generating unconventional comment...');
+  // Show the user: spinner and "Drafting authentic comment with Okwu..."
+  showCommentToast('Okwu: Drafting authentic comment...');
 
   const angles: CommentAnglePreference[] = [
     'grounded_peer',
@@ -200,7 +200,7 @@ export async function triggerCommentGeneration(
         await insertCommentIntoEditor(editor, comment);
         editor.setAttribute('data-ai-comment-handled', 'true');
 
-        showCommentToast('Unconventional comment applied', true, () => {
+        showCommentToast('Okwu comment applied', true, () => {
           // Allow user to click 'New Angle' to regenerate
           const nextAngle =
             angles[(angles.indexOf(chosenAngle) + 1) % angles.length];
@@ -212,7 +212,7 @@ export async function triggerCommentGeneration(
         const errorMsg =
           response?.error ||
           response?.data?.error ||
-          'Failed to generate comment. Click AI Comment to retry.';
+          'Failed to generate comment. Click Okwu to retry.';
         showCommentToast(`AI Error: ${errorMsg}`, true);
       }
     }
@@ -233,7 +233,7 @@ function updateToolbarButtonState(editor: HTMLElement, isGenerating: boolean): v
     btn.disabled = true;
     btn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: linkedinSpin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-      <span style="font-size:11px; font-weight:600; color:#2563eb;">Generating...</span>
+      <span style="font-size:11px; font-weight:600; color:#2563eb;">Drafting...</span>
     `;
   } else {
     btn.disabled = false;
@@ -241,13 +241,13 @@ function updateToolbarButtonState(editor: HTMLElement, isGenerating: boolean): v
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
         <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
       </svg>
-      <span style="font-size:11px; font-weight:600;">AI Comment</span>
+      <span style="font-size:11px; font-weight:600;">Okwu</span>
     `;
   }
 }
 
 /**
- * Injects a handy "✨ AI Comment" button into the comment box toolbar.
+ * Injects a handy "✨ Okwu" button into the comment box toolbar.
  */
 function injectCommentToolbarButton(editor: HTMLElement): void {
   const commentBox = editor.closest('.ckymfu, .comments-comment-box, div[id*="asyncInlineCommentBoxSlot"]') || editor.parentElement;
@@ -265,7 +265,7 @@ function injectCommentToolbarButton(editor: HTMLElement): void {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'linkedin-ai-generate-comment-btn';
-  btn.setAttribute('aria-label', 'Generate unconventional comment with AI');
+  btn.setAttribute('aria-label', 'Generate authentic comment with Okwu');
   btn.style.cssText = `
     display: inline-flex;
     align-items: center;
@@ -286,7 +286,7 @@ function injectCommentToolbarButton(editor: HTMLElement): void {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
     </svg>
-    <span style="font-size:11px; font-weight:600;">AI Comment</span>
+    <span style="font-size:11px; font-weight:600;">Okwu</span>
   `;
 
   btn.addEventListener('mouseenter', () => {

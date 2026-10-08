@@ -28,6 +28,7 @@ import { ResumeUploader } from "./resume-uploader";
 import { ProfileEditor } from "./profile-editor";
 import { StylePreferencesComponent } from "./style-preferences";
 import { JobTargetConfig } from "./job-target-config";
+import { OkwuLogo } from "../components/okwu-logo";
 
 export const OptionsApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
@@ -133,16 +134,18 @@ export const OptionsApp: React.FC = () => {
         {/* Header */}
         <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-              <Sparkles className="h-6 w-6" aria-hidden="true" />
-            </div>
+            <OkwuLogo size={44} />
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">
-                LinkedIn Connection Note Assistant
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-slate-900 leading-tight">
+                  Okwu
+                </h1>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800">
+                  Settings
+                </span>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Personalized connection requests powered by your resume and
-                OpenAI
+                Authentic LinkedIn connection notes and high-signal comments powered by your voice
               </p>
             </div>
           </div>

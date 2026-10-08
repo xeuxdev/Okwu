@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  Sparkles,
   Settings,
   CheckCircle2,
   AlertCircle,
@@ -11,6 +10,7 @@ import {
 import { ExtensionSettings } from "../types/extension-types";
 import { getSettings, DEFAULT_SETTINGS } from "../services/storage-service";
 import { getPlanStatus } from "../services/plan-service";
+import { OkwuLogo } from "../components/okwu-logo";
 
 export const PopupApp: React.FC = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
@@ -59,7 +59,7 @@ export const PopupApp: React.FC = () => {
   if (isLoading) {
     return (
       <div className="w-90 p-6 text-center text-xs font-medium text-slate-500 bg-white">
-        Loading assistant...
+        Loading Okwu...
       </div>
     );
   }
@@ -69,15 +69,18 @@ export const PopupApp: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 p-4 bg-slate-50">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </div>
+          <OkwuLogo size={32} />
           <div>
-            <h1 className="text-sm font-bold text-slate-900 leading-tight">
-              LinkedIn Note Assistant
-            </h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-sm font-bold text-slate-900 leading-tight">
+                Okwu
+              </h1>
+              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
+                v1.0
+              </span>
+            </div>
             <p className="text-[11px] text-slate-500">
-              OpenAI Personalized Notes
+              Authentic LinkedIn Voice & Notes
             </p>
           </div>
         </div>

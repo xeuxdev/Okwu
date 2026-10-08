@@ -1,17 +1,18 @@
-# LinkedIn Connection Message Assistant (Chrome Extension)
+# Okwu
 
-A Chrome extension (Manifest V3) built with React, Tailwind CSS v4, and OpenAI that crafts personalized LinkedIn connection notes tailored to your resume and the recipient profile.
+> **Okwu** (*noun*, Igbo: "speech", "word", "conversation")  
+> An authentic AI voice for LinkedIn. Craft thoughtful, human connection notes and high-signal comments without corporate bot slop.
 
 ## Key Features
 
-- **OpenAI Powered Drafting**: Replaced Anthropic with OpenAI (`gpt-4o-mini`, `gpt-4o`, etc.) to parse resumes and generate connection messages under LinkedIn's 300 character limit.
+- **Authentic Voice & Comments**: Generates human, peer-to-peer reactions for LinkedIn posts (celebrating milestones first before dropping witty or post-matched remarks) without forced questions or AI slop.
+- **Smart Connection Notes**: Crafts personalized LinkedIn connection requests tailored to your background, resume fact sheets, and the recipient's profile within character limits.
 - **Client-Side Resume Parsing**: Extracts text from PDF and DOCX resumes locally in the browser using PDF.js and Mammoth without uploading raw files to external servers.
 - **Structured Profile Editor**: Automatically extracts full name, current role, key skills, and notable highlights, allowing inline editing.
 - **Tone & Style Customization**: Select tones (Conversational, Professional, Direct, Enthusiastic) and set specific custom instructions, sample notes, and topics to avoid.
-- **Non-Intrusive LinkedIn Integration**: Injects a clean "Draft Note" action button into LinkedIn profile headers (`linkedin.com/in/*`) and provides a floating trigger.
-- **Shadow DOM Isolation**: Renders the drafting modal in a Shadow DOM with Tailwind styles so LinkedIn styles do not interfere.
-- **Live Character Counter**: Color-coded counter ensuring messages stay strictly within LinkedIn's 300 character constraint.
-- **Safe Insertion**: Automatically fills LinkedIn's native "Add a note" textarea when requested. Never clicks the Send button; the user always retains manual control.
+- **Non-Intrusive LinkedIn Integration**: Injects a clean "Okwu Note" action button into LinkedIn profile headers (`linkedin.com/in/*`) and an "Okwu" toolbar button for inline comments.
+- **Shadow DOM Isolation**: Renders drafting modals in a Shadow DOM with Tailwind styles so LinkedIn styles do not interfere.
+- **Safe Insertion**: Automatically fills LinkedIn's native "Add a note" textarea or comment box when requested. Never clicks the Send button; the user always retains manual control.
 
 ## Tech Stack
 

@@ -22,6 +22,7 @@ import {
 } from "../types/extension-types";
 import { getPlanStatus } from "../services/plan-service";
 import { insertNoteIntoLinkedIn } from "./note-injector";
+import { OkwuLogo } from "../components/okwu-logo";
 
 interface DraftCardProps {
   targetProfile: TargetProfileData;
@@ -217,16 +218,14 @@ export const DraftCard: React.FC<DraftCardProps> = ({
       {/* Header */}
       <div className="flex items-start justify-between border-b border-slate-100 pb-4 mb-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-            <Sparkles className="h-5 w-5" aria-hidden="true" />
-          </div>
+          <OkwuLogo size={36} />
           <div>
             <div className="flex items-center gap-2">
               <h2
                 id="assistant-modal-title"
                 className="text-base font-bold text-slate-900 leading-tight"
               >
-                LinkedIn Note Assistant
+                Okwu
               </h2>
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
                 {planBadge}
