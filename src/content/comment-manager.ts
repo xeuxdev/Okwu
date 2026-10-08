@@ -163,16 +163,25 @@ export async function triggerCommentGeneration(
   showCommentToast('Generating unconventional comment...');
 
   const angles: CommentAnglePreference[] = [
-    'tactical_question',
-    'counter_intuitive',
     'grounded_peer',
-    'witty_perspective'
+    'witty_perspective',
+    'counter_intuitive',
+    'tactical_question'
+  ];
+
+  // Bias default selection towards grounded peer and witty perspectives (statements over questions)
+  const defaultAnglePool: CommentAnglePreference[] = [
+    'grounded_peer',
+    'witty_perspective',
+    'grounded_peer',
+    'witty_perspective',
+    'counter_intuitive'
   ];
 
   // Rotate angle if requested
   const chosenAngle =
     angleOverride ||
-    angles[Math.floor(Math.random() * angles.length)];
+    defaultAnglePool[Math.floor(Math.random() * defaultAnglePool.length)];
 
   chrome.runtime.sendMessage(
     {

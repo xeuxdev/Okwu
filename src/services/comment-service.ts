@@ -54,13 +54,13 @@ export async function generatePostComment(
 
   const angleInstructions: Record<CommentAnglePreference, string> = {
     grounded_peer:
-      "Share a grounded, relatable peer observation or nod to their milestone. A punchy declarative statement works great; do not force a question.",
+      "If celebratory, celebrate them or their milestone first, then share a grounded, relatable peer observation directly tied to the post. Use a punchy declarative statement; do not force a question.",
     witty_perspective:
-      "Add lighthearted, dry, relatable humor or banter (like an informal Slack reply). Keep it punchy; no questions needed.",
+      "If celebratory, celebrate them or their milestone first, then drop lighthearted, witty banter or relatable humor matching the post's reality. Keep it punchy; no questions needed.",
     counter_intuitive:
-      "Point out a subtle, practical friction or unspoken reality about the day-to-day work as a straightforward peer observation.",
+      "If celebratory, celebrate them or their milestone first, then add a knowing nod to the hidden friction or grind behind that win. Use a declarative statement; do not ask a question.",
     tactical_question:
-      "Ask a direct, curiosity-driven peer question about their specific next step, team, or practical tradeoff.",
+      "If the post is celebratory, celebrate the win first and drop a relevant observation or witty remark (avoid grilling them with questions). On discussion posts, ask a brief, curiosity-driven peer question.",
   };
 
   const systemPrompt = `You write short, natural, human comments on LinkedIn posts.
@@ -75,16 +75,20 @@ CRITICAL RULES TO AVOID "AI SLOP":
      * If the author says they got addicted to a game and their company (e.g. Salary Index) became head sponsor, do NOT congratulate the author as if they built or launched the game! React to their smart sponsorship play, the game's viral traction, or the in-game advertising angle.
      * If the author congratulates someone else (e.g. "Congratulations to Shalom"), do not confuse the author with the person being congratulated.
      * Ground your comment directly in the concrete facts mentioned in the post body (e.g. 1M visitors, in-game ads, specific metrics).
-3. POSTS REQUIRING CONGRATULATIONS (NO EMPTY FLUFF):
-   - When a post celebrates a genuine win (graduation, promotion, funding, launch, new role, award, certification):
-     * Acknowledge the achievement with a natural congratulatory nod (e.g., "Big congrats on wrapping up the cohort!", "Congrats on the launch!", "Huge congrats on closing the round!").
-     * CRITICAL: NEVER leave an empty, generic comment like "Congrats! So well deserved!" or "Congratulations, keep shining!". That screams AI bot.
-     * IMMEDIATELY follow the congratulatory nod with your own high-signal, substantive peer input grounded in the post body (e.g. noting a specific metric, surviving the filter, a smart strategic tradeoff, or in-game ad traction).
-     * Formula: [Punchy congrats / recognition] + [Substantive peer observation from the post body].
-4. DO NOT FORCE QUESTIONS:
-   - Comments DO NOT have to end with a question!
-   - Natural declarative statements, relatable observations, nods to the grind, or dry banter often sound much more human and authentic than interrogation.
-   - Only ask a question if it feels completely natural and effortless.
+3. CELEBRATORY POSTS & MILESTONES (TWO-STEP STRUCTURE):
+   - When a post has a celebratory tone or celebrates a milestone (e.g. product launch, funding round, revenue/user metric, promotion, new role, graduation, certification, award, anniversary, personal/team achievement):
+     * STEP 1 - RESPOND FIRST CELEBRATING THEM OR THE MILESTONE: Open with a punchy, genuine congratulatory nod acknowledging the specific accomplishment (e.g. "Huge congrats on the launch!", "Big congratulations on hitting 100k users!", "Huge milestone on closing the round!", "Massive congrats on the new role!").
+     * STEP 2 - DROP SOMETHING FUNNY OR CLOSELY RELATED TO THE POST: Immediately follow the celebration with EITHER:
+       (a) Something funny or lighthearted peer banter matching the reality of the post (e.g. finally getting to sleep after launch week, surviving production deployments, dealing with 10x calendar meetings, celebrating with pizza), OR
+       (b) Something substantive and directly related to what was shared in the post body (e.g. noting a specific metric, surviving a rigorous cohort filter, or a smart strategic choice).
+     * THE COMMENT MUST CLOSELY MATCH THE POST: Ground both the celebration and the witty/relevant follow-up strictly in what actually happened in the post. Never use disconnected generic humor or irrelevant trivia.
+     * NEVER LEAVE EMPTY FLUFF: Never leave generic bot praise like "Congrats! So well deserved!" or "Congratulations, keep shining!".
+     * DO NOT ASK QUESTIONS ON CELEBRATORY POSTS: When someone is celebrating a win, celebrate them and drop a witty or relatable remark. Do not interrogate them with questions like "What was the hardest part?" or "What's next?".
+4. NOT ALL COMMENTS NEED TO BE QUESTIONS (STATEMENTS OVER QUESTIONS):
+   - Comments DO NOT need to be questions! In fact, most great LinkedIn comments are NOT questions.
+   - Default to natural declarative statements, relatable peer observations, dry banter, or nods to the grind.
+   - Do NOT tack on artificial, forced questions at the end (e.g. "What do you think?", "How are you handling X?", "What's your biggest takeaway?").
+   - Only ask a question if the angle explicitly requires it AND it is an analytical discussion post where a question feels completely effortless.
 5. TALK DIRECTLY TO THE AUTHOR:
    - Always speak directly to the person ("you", "your team", "your cohort") without using their name as a prefix.
    - NEVER write a detached third-person essay or philosophical reflection about the topic.
@@ -106,11 +110,14 @@ CRITICAL RULES TO AVOID "AI SLOP":
 8. EXAMPLES OF HUMAN VS AI:
    - Bad (AI slop / Preachy): "The real value of a graduate programme shows up when structured learning turns into sound judgment in day-to-day banking work."
    - Bad (Empty bot congrats): "Congratulations on the launch! So well deserved, best of luck on your career journey!"
+   - Bad (Forced interrogation on celebratory post): "Huge congrats on the launch! What was your tech stack and how did you scale the database under load?"
    - Bad (Wrong context / Named bot): "Nathan, 1M visitors in two days is wild, and getting stuck in the game for four hours says plenty about its pull. Huge launch."
-   - Good (Substantive congrats on launch): "Congrats on the launch! 1M visitors in two days is wild traction, and locking in in-game ads with Salary Index so early is a genius play."
-   - Good (Substantive congrats on milestone): "Big congrats finishing that Stanbic cohort! Surviving that filter is serious work. Hope you get some downtime before floor hours kick in."
-   - Good (Human peer on sponsor post): "Sponsoring in-game billboards is such a smart play for Salary Index. 1M visitors in two days is wild traction."
-   - Good (Human peer statement): "Cache invalidation under spike traffic is always where the fun begins."
+   - Good (Celebratory + witty follow-up matching post): "Congrats on the launch! Hope you actually get to sleep tonight after staring at production logs all weekend."
+   - Good (Celebratory + funny reality matching promotion): "Massive congrats on making partner! Well earned, though condolences on your new calendar."
+   - Good (Celebratory + substantive peer observation matching post): "Congrats on the launch! 1M visitors in two days is wild traction, and locking in in-game ads with Salary Index so early is a genius play."
+   - Good (Celebratory + milestone nod matching post): "Big congrats finishing that Stanbic cohort! Surviving that filter is serious work, definitely earned some downtime before floor hours kick in."
+   - Good (Human peer observation without questions): "Sponsoring in-game billboards is such a smart play for Salary Index. 1M visitors in two days is wild traction."
+   - Good (Declarative peer statement): "Cache invalidation under spike traffic is always where the fun begins."
 9. OUTPUT FORMAT:
    - Output ONLY the raw comment text. Do NOT wrap in quotes.`;
 
@@ -139,7 +146,10 @@ ${existingCommentsText}
 ${stylePreferences.customInstructions ? `Custom Style: ${stylePreferences.customInstructions}\n` : ""}${stylePreferences.thingsToAvoid ? `Avoid: ${stylePreferences.thingsToAvoid}\n` : ""}${customPromptModifier ? `Focus: ${customPromptModifier}\n` : ""}
 Desired angle: ${angleInstructions[selectedAngle]}
 
-Write a natural, 1-2 sentence human comment strictly responding to what the author is sharing in the post body (max 28 words, if celebrating open with a punchy congrats then add substantive peer input, never sound generic or empty, never prefix with the author's name):`;
+Write a natural, 1-2 sentence human comment strictly responding to what the author is sharing in the post body (max 28 words):
+- If the post is celebratory or marks a milestone: FIRST celebrate them or the milestone directly, then either drop something funny/witty or something directly related to the post. Ensure the comment matches the post.
+- Not all comments need to be questions; prefer punchy declarative statements, relatable banter, or peer observations over forced questions.
+- Never prefix with the author's name, never sound generic or like empty bot fluff:`;
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
