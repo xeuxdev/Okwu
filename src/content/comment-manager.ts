@@ -7,6 +7,7 @@ import {
 import {
   findPostContainer,
   extractPostContext,
+  expandPostText,
   isCommentEditorEmpty
 } from './comment-extractor';
 import {
@@ -27,10 +28,11 @@ function removeCommentToast(): void {
 /**
  * Renders the floating notification toast for comment generation with spinner or completion state.
  */
-function showCommentToast(
+export function showCommentToast(
   message: string,
   isDone: boolean = false,
-  onAdjust?: () => void
+  onAdjust?: () => void,
+  actionLabel: string = 'New Angle'
 ): void {
   removeCommentToast();
 
@@ -61,7 +63,7 @@ function showCommentToast(
     : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: linkedinSpin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
 
   const actionButtons = isDone && onAdjust
-    ? `<button id="linkedin-ai-comment-adjust-btn" style="background-color: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; margin-left: 4px;">New Angle</button>`
+    ? `<button id="linkedin-ai-comment-adjust-btn" style="background-color: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; margin-left: 4px;">${actionLabel}</button>`
     : '';
 
   toast.innerHTML = `
@@ -102,6 +104,12 @@ export async function triggerCommentGeneration(
   angleOverride?: CommentAnglePreference
 ): Promise<void> {
   if (isCurrentlyGeneratingComment) return;
+
+  // Lock immediately: expanding the post below is async and auto-fill polls in the meantime
+  isCurrentlyGeneratingComment = true;
+  editor.setAttribute('data-ai-comment-handled', 'pending');
+  updateToolbarButtonState(editor, true);
+  showCommentToast('Okwu: Reading the full post...');
 
   let postContainer = findPostContainer(editor);
   let postContext = postContainer ? extractPostContext(postContainer) : null;
@@ -147,41 +155,41 @@ export async function triggerCommentGeneration(
     }
   }
 
+  // Expand "...more" so the model reads the whole post, then re-read it
+  if (postContainer) {
+    try {
+      await expandPostText(postContainer);
+      const fullContext = extractPostContext(postContainer);
+      if (fullContext.postText.length >= (postContext?.postText.length || 0)) {
+        postContext = fullContext;
+      }
+    } catch {
+      // Keep the context we already have
+    }
+  }
+
   if (!postContext?.postText || postContext.postText.length < 15) {
+    isCurrentlyGeneratingComment = false;
+    updateToolbarButtonState(editor, false);
     editor.setAttribute('data-ai-comment-handled', 'no_post');
     showCommentToast('Could not detect post text. Click AI Comment to retry.', true);
     return;
   }
 
-  isCurrentlyGeneratingComment = true;
-  editor.setAttribute('data-ai-comment-handled', 'pending');
-
-  // Update injected toolbar button if present
-  updateToolbarButtonState(editor, true);
-
   // Show the user: spinner and "Drafting authentic comment with Okwu..."
   showCommentToast('Okwu: Drafting authentic comment...');
 
+  // First draft lets the model pick the move that fits the post; 'New Angle' cycles through explicit moves
   const angles: CommentAnglePreference[] = [
-    'grounded_peer',
-    'witty_perspective',
-    'counter_intuitive',
-    'tactical_question'
+    'auto',
+    'congrats',
+    'clarifying_question',
+    'banter',
+    'well_wishes',
+    'peer_take'
   ];
 
-  // Bias default selection towards grounded peer and witty perspectives (statements over questions)
-  const defaultAnglePool: CommentAnglePreference[] = [
-    'grounded_peer',
-    'witty_perspective',
-    'grounded_peer',
-    'witty_perspective',
-    'counter_intuitive'
-  ];
-
-  // Rotate angle if requested
-  const chosenAngle =
-    angleOverride ||
-    defaultAnglePool[Math.floor(Math.random() * defaultAnglePool.length)];
+  const chosenAngle = angleOverride || 'auto';
 
   chrome.runtime.sendMessage(
     {

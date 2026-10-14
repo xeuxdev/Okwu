@@ -141,6 +141,11 @@ export interface GenerateDraftRequest {
   jobTargetOverride?: Partial<JobTargetSettings>;
 }
 
+export interface NoteOption {
+  move: string;
+  text: string;
+}
+
 export interface GenerateDraftResponse {
   success: boolean;
   draftText?: string;
@@ -150,6 +155,9 @@ export interface GenerateDraftResponse {
   matchedHighlight?: string;
   messagesRemaining?: number;
   monthlyLimitReached?: boolean;
+  options?: NoteOption[];
+  recommendedReason?: string;
+  risk?: string;
 }
 
 export interface ExistingComment {
@@ -163,15 +171,26 @@ export interface PostContext {
   postAuthorHeadline?: string;
   postAuthorProfileUrl?: string;
   postText: string;
+  /** Original post when the author reshared someone else's post with their own commentary */
+  resharedPost?: { author?: string; text: string };
+  /** Image descriptions, link/article cards, celebration or job cards attached to the post */
+  attachmentText?: string;
   existingComments?: ExistingComment[];
   postUrn?: string;
 }
 
 export type CommentAnglePreference =
-  | 'tactical_question'
-  | 'counter_intuitive'
-  | 'grounded_peer'
-  | 'witty_perspective';
+  | 'auto'
+  | 'congrats'
+  | 'well_wishes'
+  | 'clarifying_question'
+  | 'banter'
+  | 'peer_take';
+
+export interface CommentOption {
+  move: string;
+  comment: string;
+}
 
 export interface GenerateCommentRequest {
   postContext: PostContext;
@@ -185,6 +204,62 @@ export interface GenerateCommentResponse {
   angleUsed?: string;
   error?: string;
   characterCount?: number;
+  planUsed?: string;
+  messagesRemaining?: number;
+  monthlyLimitReached?: boolean;
+  postType?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  options?: CommentOption[];
+  recommendedReason?: string;
+  risk?: string;
+}
+
+export type MessageIntent =
+  | 'auto'
+  | 'say_hi'
+  | 'ask_question'
+  | 'job_referral'
+  | 'collaborate'
+  | 'congrats'
+  | 'follow_up';
+
+export interface ThreadMessage {
+  fromMe: boolean;
+  text: string;
+}
+
+export interface ConversationContext {
+  recipientName: string;
+  recipientHeadline?: string;
+  recipientProfileUrl?: string;
+  connectionDegree?: string;
+  /** Other people on a group thread, if any */
+  otherRecipients?: string[];
+  /** Earlier messages in the thread, oldest first; empty for a brand new conversation */
+  history: ThreadMessage[];
+  /** Richer profile data, available when the user is on the recipient's profile page */
+  recipientProfile?: TargetProfileData;
+}
+
+export interface MessageOption {
+  move: string;
+  text: string;
+}
+
+export interface GenerateMessageRequest {
+  conversation: ConversationContext;
+  intent?: MessageIntent;
+  /** Rough notes the user typed into the message box before clicking Okwu */
+  brief?: string;
+}
+
+export interface GenerateMessageResponse {
+  success: boolean;
+  messageText?: string;
+  options?: MessageOption[];
+  recommendedReason?: string;
+  risk?: string;
+  error?: string;
   planUsed?: string;
   messagesRemaining?: number;
   monthlyLimitReached?: boolean;
@@ -206,6 +281,7 @@ export interface TestConnectionResponse {
 export type ExtensionMessageType =
   | { type: 'GENERATE_DRAFT'; payload: GenerateDraftRequest }
   | { type: 'GENERATE_COMMENT'; payload: GenerateCommentRequest }
+  | { type: 'GENERATE_MESSAGE'; payload: GenerateMessageRequest }
   | { type: 'PARSE_RESUME_TO_FACT_SHEET'; payload: { rawText: string; linkedInProfile?: LinkedInSelfProfile } }
   | { type: 'SYNC_MY_LINKEDIN_PROFILE' }
   | { type: 'TEST_OPENAI_KEY'; payload: { apiKey: string; model: string } }

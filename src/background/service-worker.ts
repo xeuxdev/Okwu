@@ -3,6 +3,7 @@ import {
   ExtensionMessageResponse,
   GenerateDraftResponse,
   GenerateCommentResponse,
+  GenerateMessageResponse,
   ParseResumeResponse,
   TestConnectionResponse,
   ExtensionSettings
@@ -15,6 +16,7 @@ import {
   resolveEffectiveApiKeyAndModel
 } from '../services/openai-service';
 import { generatePostComment } from '../services/comment-service';
+import { generateDirectMessage } from '../services/message-service';
 import { syncLinkedInProfileFromBrowser } from '../services/linkedin-sync-service';
 import {
   getPlanStatus,
@@ -197,6 +199,68 @@ async function handleMessage(
       return {
         success: true,
         data: commentResult
+      };
+    }
+
+    case 'GENERATE_MESSAGE': {
+      const settings = await getSettings();
+      const planStatus = getPlanStatus(settings);
+
+      if (!planStatus.canGenerate) {
+        return {
+          success: false,
+          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings.',
+          data: {
+            success: false,
+            error: 'Monthly limit reached (3/3 used this month).',
+            monthlyLimitReached: true,
+            messagesRemaining: 0
+          } as GenerateMessageResponse
+        };
+      }
+
+      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
+        settings.openaiApiKey,
+        settings.openaiModel,
+        settings.useCustomApiKey
+      );
+
+      if (!apiKey) {
+        return {
+          success: false,
+          error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
+        };
+      }
+
+      const messageResult: GenerateMessageResponse = await generateDirectMessage(
+        apiKey,
+        model,
+        settings.userProfile,
+        settings.stylePreferences,
+        message.payload.conversation,
+        message.payload.intent,
+        message.payload.brief,
+        settings.baseFactSheet,
+        settings.jobTargetSettings
+      );
+
+      if (!messageResult.success) {
+        return {
+          success: false,
+          error: messageResult.error || 'Failed to generate message.'
+        };
+      }
+
+      const updatedSettings = recordMessageUsage(settings);
+      await saveSettings(updatedSettings);
+
+      const updatedStatus = getPlanStatus(updatedSettings);
+      messageResult.planUsed = planStatus.planLabel;
+      messageResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
+
+      return {
+        success: true,
+        data: messageResult
       };
     }
 

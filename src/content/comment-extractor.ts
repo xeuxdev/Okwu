@@ -131,6 +131,132 @@ export function isCommentEditorEmpty(editor: HTMLElement): boolean {
   return false;
 }
 
+const POST_BODY_SELECTOR =
+  '[data-sdui-anchor-id*="commentary"], .feed-shared-update-v2__description, .update-components-text, [data-testid="expandable-text-box"], .feed-shared-inline-show-more-text';
+
+const RESHARE_SELECTOR =
+  '.feed-shared-reshare, .feed-shared-mini-update-v2, .update-components-mini-update-v2, [data-testid*="reshare"], div[class*="reshare"]';
+
+const NON_POST_AREA_SELECTOR =
+  '[id^="replaceableComment_"], [data-testid*="commentList"], .comments-comment-item, .comments-comments-list, [id*="asyncInlineCommentBox"], .comments-comment-box';
+
+function isInNonPostArea(el: Element): boolean {
+  return Boolean(el.closest(NON_POST_AREA_SELECTOR));
+}
+
+/**
+ * Finds the "...more" / "see more" toggles of the post body (and any reshared post), excluding comments.
+ */
+function findSeeMoreButtons(postContainer: HTMLElement): HTMLElement[] {
+  const explicit = Array.from(
+    postContainer.querySelectorAll<HTMLElement>(
+      '[data-testid="expandable-text-button"], .feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more'
+    )
+  );
+
+  // Hashed SDUI classes change often, so also match buttons by their label
+  const byLabel = Array.from(postContainer.querySelectorAll<HTMLElement>('button, [role="button"]')).filter(
+    (btn) => {
+      const label = cleanText(btn.textContent || btn.getAttribute('aria-label')).toLowerCase();
+      return /^(…|\.\.\.)?\s*(see |show )?more$/.test(label) || /see more, visually reveals content/.test(label);
+    }
+  );
+
+  return Array.from(new Set([...explicit, ...byLabel])).filter((btn) => {
+    if (isInNonPostArea(btn)) return false;
+    if (btn.tagName === 'A') return false; // never follow links, only inline toggles
+    if (btn.getAttribute('aria-expanded') === 'true') return false;
+    const label = cleanText(btn.textContent).toLowerCase();
+    if (/less$/.test(label)) return false;
+    const rect = btn.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+}
+
+function measurePostBodyLength(postContainer: HTMLElement): number {
+  return Array.from(postContainer.querySelectorAll<HTMLElement>(POST_BODY_SELECTOR))
+    .filter((el) => !isInNonPostArea(el))
+    .reduce((sum, el) => sum + (el.textContent || '').length, 0);
+}
+
+/**
+ * Clicks the post's "see more" toggles and waits until the expanded text has rendered,
+ * so the model reads the full post instead of the truncated preview.
+ */
+export async function expandPostText(postContainer: HTMLElement, timeoutMs: number = 2000): Promise<void> {
+  const buttons = findSeeMoreButtons(postContainer);
+  if (buttons.length === 0) return;
+
+  const initialLength = measurePostBodyLength(postContainer);
+  for (const btn of buttons) {
+    try {
+      btn.click();
+    } catch {
+      // Ignore toggles that fail to click
+    }
+  }
+
+  // Wait until the text has grown and then stopped changing for two consecutive checks
+  const start = Date.now();
+  let lastLength = initialLength;
+  let stableTicks = 0;
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const length = measurePostBodyLength(postContainer);
+    if (length > initialLength && length === lastLength) {
+      stableTicks++;
+      if (stableTicks >= 2) return;
+    } else {
+      stableTicks = 0;
+    }
+    lastLength = length;
+  }
+}
+
+/**
+ * Collects non-text context attached to the post: image descriptions, link/article cards,
+ * celebration or new-job cards, polls and documents.
+ */
+function extractAttachmentText(postContainer: HTMLElement, postAuthorName: string): string {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const add = (label: string, raw?: string | null) => {
+    const text = cleanText(raw);
+    if (!text || text.length < 4 || seen.has(text.toLowerCase())) return;
+    seen.add(text.toLowerCase());
+    parts.push(`${label}: ${text.slice(0, 300)}`);
+  };
+
+  const cardSelectors: Array<[string, string]> = [
+    ['Celebration card', '.update-components-celebration, [class*="celebration"]'],
+    ['Linked article', '.update-components-article__title, .update-components-article__subtitle, .feed-shared-article__title, .feed-shared-article__subtitle, [data-testid*="article"]'],
+    ['Linked card', '.update-components-entity__title, .update-components-entity__subtitle, .update-components-entity__description'],
+    ['Job card', '.update-components-job, [class*="job-posting"]'],
+    ['Event card', '.update-components-event, [class*="event-card"]'],
+    ['Poll', '.update-components-poll__question, [class*="poll"] h3, [class*="poll"] legend'],
+    ['Document', '.document-s-container__title, [class*="document"] h3'],
+  ];
+
+  for (const [label, selector] of cardSelectors) {
+    postContainer.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      if (isInNonPostArea(el) || el.closest(POST_BODY_SELECTOR)) return;
+      add(label, el.textContent);
+    });
+  }
+
+  postContainer.querySelectorAll<HTMLImageElement>('img[alt]').forEach((img) => {
+    if (isInNonPostArea(img)) return;
+    if (img.closest('.update-components-actor, .feed-shared-actor, [data-testid*="actor"], div[class*="actor"]')) return;
+    const alt = img.alt.trim();
+    if (alt.length < 15) return;
+    if (/no alternative text|profile|logo|view .*'s|^photo of /i.test(alt)) return;
+    if (postAuthorName && alt.toLowerCase().includes(postAuthorName.toLowerCase()) && alt.length < 40) return;
+    add('Image', alt);
+  });
+
+  return parts.slice(0, 6).join('\n');
+}
+
 /**
  * Extracts clean text from an element while preserving paragraph and line breaks.
  */
@@ -272,22 +398,40 @@ export function extractPostContext(postContainer: HTMLElement): PostContext {
   // 2. Post Body Text Extraction
   let postText = '';
 
+  let resharedText = '';
+
   // Look for primary commentary containers outside comments and actor header
   const primaryCommentaryEls = Array.from(
-    postContainer.querySelectorAll<HTMLElement>(
-      '[data-sdui-anchor-id*="commentary"], .feed-shared-update-v2__description, .update-components-text, [data-testid="expandable-text-box"], .feed-shared-inline-show-more-text'
-    )
+    postContainer.querySelectorAll<HTMLElement>(POST_BODY_SELECTOR)
   ).filter((el) => {
     return !el.closest(
       '[id^="replaceableComment_"], [data-testid*="commentList"], .comments-comment-item, [id*="asyncInlineCommentBox"], .update-components-header, .feed-shared-header, .update-components-actor, .feed-shared-actor'
     );
   });
 
+  // Keep the author's own words separate from a reshared post so the model knows which is which
   for (const el of primaryCommentaryEls) {
     const text = extractCleanText(el);
-    if (text.length > postText.length) {
+    if (el.closest(RESHARE_SELECTOR)) {
+      if (text.length > resharedText.length) resharedText = text;
+    } else if (text.length > postText.length) {
       postText = text;
     }
+  }
+
+  // A plain repost has no commentary of its own; treat the original as the post
+  if (!postText && resharedText) {
+    postText = resharedText;
+    resharedText = '';
+  }
+
+  let resharedAuthor = '';
+  if (resharedText) {
+    const reshareEl = postContainer.querySelector<HTMLElement>(RESHARE_SELECTOR);
+    const nameEl = reshareEl?.querySelector<HTMLElement>(
+      '.update-components-actor__name, .feed-shared-actor__name, a[href*="/in/"] span[aria-hidden="true"], a[href*="/company/"] span[aria-hidden="true"], strong'
+    );
+    resharedAuthor = cleanText(nameEl?.textContent).replace(/•.*$/, '').trim();
   }
 
   // Fallback for older layouts
@@ -360,6 +504,10 @@ export function extractPostContext(postContainer: HTMLElement): PostContext {
     postAuthorHeadline: postAuthorHeadline || undefined,
     postAuthorProfileUrl: postAuthorProfileUrl || undefined,
     postText: postText,
+    resharedPost: resharedText
+      ? { author: resharedAuthor || undefined, text: resharedText }
+      : undefined,
+    attachmentText: extractAttachmentText(postContainer, postAuthorName) || undefined,
     existingComments: existingComments.length > 0 ? existingComments : undefined,
     postUrn
   };

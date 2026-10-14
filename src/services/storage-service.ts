@@ -40,9 +40,12 @@ export const DEFAULT_BASE_FACT_SHEET: BaseFactSheet = {
 
 export const DEFAULT_STYLE_PREFERENCES: StylePreferences = {
   tone: 'conversational',
-  customInstructions: 'Focus on mutual interests, shared domain expertise, or recent achievements. Keep it natural and concise.',
-  thingsToAvoid: 'Do not use cheesy flattery, fake enthusiasm, or generic phrases like "I would love to pick your brain".',
-  sampleNote: 'Hi [Name], loved your recent work on [Topic]. Working on similar challenges in [My Role], would enjoy staying in touch!'
+  customInstructions:
+    'Casual and warm, like a real person in their network typing quickly. Peer to peer, grounded in true facts.',
+  thingsToAvoid:
+    'Banned openers: Great post, Love this, This resonates, Thanks for sharing, Spot on, Well said. Banned vocab: pivotal, transformative, groundbreaking, testament, journey, leverage, unlock, seamless, cutting-edge. No em dashes.',
+  sampleNote:
+    'Both NICs on socket 0 for every run. Did you try the reverse, or is the penalty symmetric?'
 };
 
 export const DEFAULT_JOB_TARGET_SETTINGS: JobTargetSettings = {

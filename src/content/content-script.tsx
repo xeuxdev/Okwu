@@ -8,6 +8,7 @@ import {
   GenerateDraftResponse
 } from '../types/extension-types';
 import { checkAndAutofillComments } from './comment-manager';
+import { checkAndInjectMessageButtons } from './message-manager';
 
 let currentShadowHost: HTMLDivElement | null = null;
 let currentReactRoot: Root | null = null;
@@ -488,6 +489,7 @@ function injectFloatingTrigger() {
 }
 
 let commentPollInterval: ReturnType<typeof setInterval> | null = null;
+let messagePollInterval: ReturnType<typeof setInterval> | null = null;
 
 function updateInjection() {
   // Comment checking runs across all LinkedIn pages (feed, posts, profile activity)
@@ -495,6 +497,12 @@ function updateInjection() {
     commentPollInterval = setInterval(checkAndAutofillComments, 600);
   }
   checkAndAutofillComments();
+
+  // The chat overlay lives in a shadow root the MutationObserver can't see, so also poll for it
+  if (!messagePollInterval) {
+    messagePollInterval = setInterval(checkAndInjectMessageButtons, 1000);
+  }
+  checkAndInjectMessageButtons();
 
   if (isLinkedInProfilePage()) {
     injectProfileButton();
@@ -543,6 +551,9 @@ const observer = new MutationObserver(() => {
 
   // Check if a comment box opened or expanded
   checkAndAutofillComments();
+
+  // Check if a message window or thread opened
+  checkAndInjectMessageButtons();
 });
 
 observer.observe(document.body, {

@@ -11,6 +11,11 @@ import {
   TechStackCategory,
   LinkedInSelfProfile,
 } from "../types/extension-types";
+import {
+  buildConnectionNoteSystemPrompt,
+  parseConnectionNoteResponseJson,
+  sanitizePunctuation,
+} from "./prompt-engine";
 
 interface OpenAiChatCompletionResponse {
   id: string;
@@ -593,21 +598,10 @@ CRITICAL CONVERSATIONAL RULES:
 - Must fit within 200 characters total.`;
   }
 
-  const systemPrompt = `You write personalized LinkedIn connection request notes that start natural two-way conversations.
-CRITICAL HARD CONSTRAINTS:
-1. The note MUST be strictly under 200 characters total (absolute maximum). Aim for 140-185 characters. Never exceed 200 characters.
-2. Tone: ${selectedTone}
-3. Address the person by their first name if discernible.
-4. High-impact personalization: Prioritize referencing a concrete detail from their recent post (e.g. project launch, scholarship announcement, thoughts shared), featured project, current research, or school milestone to demonstrate genuine peer engagement and shared domain interest.
-5. Create an open conversational loop: end with a natural, low-pressure question or thought that makes them want to reply.
-6. Absolutely DO NOT sound transactional or use generic clichés:
-   - Never say "I would love to pick your brain"
-   - Never say "Can you refer me" or "Check out my profile"
-   - Never say "Hope you are doing well"
-   - Never say "I came across your profile and was impressed"
-   - Never say "Let us synergize"
-7. Never use em dashes. Use commas, hyphens, or periods instead.
-8. Output ONLY the raw message text. No quotes, no markdown headers, no introductory text like "Here is your note:".`;
+  const systemPrompt = buildConnectionNoteSystemPrompt(
+    userProfile,
+    baseFactSheet,
+  );
 
   let senderContext = "";
   let matchedHighlight = "";
@@ -625,10 +619,10 @@ CRITICAL HARD CONSTRAINTS:
     matchedHighlight = matched.matchedHighlight;
   } else {
     senderContext = `SENDER INFO:
-Name: ${userProfile.fullName || "Professional"}
+Name: ${userProfile.fullName || "Candidate"}
 Role: ${userProfile.currentRole || "Specialist"}
-Skills: ${userProfile.skills.slice(0, 8).join(", ")}
-Key Highlight: ${userProfile.experienceHighlights[0] || userProfile.summary || ""}`;
+Skills: ${(userProfile.skills || []).slice(0, 8).join(", ")}
+Key Highlight: ${(userProfile.experienceHighlights || [])[0] || userProfile.summary || ""}`;
   }
 
   const expLines = (targetProfile.experiences || [])
@@ -670,13 +664,14 @@ ${eduLines ? `Education Background:\n${eduLines}` : ""}
 ${recentContent ? `Recent Post / Shared Insight: "${recentContent.slice(0, 250)}"` : ""}`;
 
   const userInstructions = `ADDITIONAL PREFERENCES:
-Custom instructions: ${stylePreferences.customInstructions || "None"}
-Things to avoid: ${stylePreferences.thingsToAvoid || "Generic templates"}
-Sample note the sender likes: ${stylePreferences.sampleNote || "None"}
+Custom instructions: ${stylePreferences.customInstructions || "Sharp, grounded engineer typing quickly"}
+Things to avoid: ${stylePreferences.thingsToAvoid || "Generic templates, corporate flattery"}
+Sample note: ${stylePreferences.sampleNote || "None"}
+Tone: ${selectedTone}
 ${jobTargetPromptContext}
 ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
 
-  const promptContent = `${senderContext}\n\n${targetContext}\n\n${userInstructions}\n\nWrite a personalized connection request note under 200 characters:`;
+  const promptContent = `${senderContext}\n\n${targetContext}\n\n${userInstructions}\n\nGenerate 3 connection note options strictly under 200 characters each (aim 120-180 chars). Pick recommended note. Respond in valid JSON.`;
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -687,11 +682,12 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
       },
       body: JSON.stringify({
         model: effectiveModel || "gpt-6-luna",
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: promptContent },
         ],
-        max_completion_tokens: 4000,
+        max_completion_tokens: 1500,
       }),
     });
 
@@ -704,9 +700,9 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
     }
 
     const choice = data.choices[0];
-    let draftText = choice?.message?.content?.trim() || "";
+    const rawContent = choice?.message?.content?.trim() || "";
 
-    if (!draftText && choice?.finish_reason === "length") {
+    if (!rawContent && choice?.finish_reason === "length") {
       return {
         success: false,
         error:
@@ -714,7 +710,10 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
       };
     }
 
-    // Remove quotes if the LLM wrapped the text in quotes
+    const parsed = parseConnectionNoteResponseJson(rawContent);
+    let draftText = parsed.draftText.trim();
+
+    // Strip quotation marks
     if (
       (draftText.startsWith('"') && draftText.endsWith('"')) ||
       (draftText.startsWith("'") && draftText.endsWith("'"))
@@ -722,10 +721,10 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
       draftText = draftText.slice(1, -1).trim();
     }
 
-    // Clean up any em dashes (Rule 9)
-    draftText = draftText.replace(/[\u2014\u2013]/g, "-");
+    // Clean up punctuation and em dashes
+    draftText = sanitizePunctuation(draftText);
 
-    // If draft exceeds 200 characters, truncate cleanly to nearest sentence or word boundary under 200 characters
+    // Enforce 200 character ceiling
     if (draftText.length > 200) {
       const truncated = draftText.slice(0, 196);
       const lastPeriod = truncated.lastIndexOf(".");
@@ -743,6 +742,9 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
       draftText,
       characterCount: draftText.length,
       matchedHighlight: matchedHighlight || undefined,
+      options: parsed.options,
+      recommendedReason: parsed.recommendedReason,
+      risk: parsed.risk,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
