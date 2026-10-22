@@ -22,6 +22,7 @@ import {
 } from "../types/extension-types";
 import { getPlanStatus } from "../services/plan-service";
 import { insertNoteIntoLinkedIn } from "./note-injector";
+import { streamGeneration } from "./stream-client";
 import { OkwuLogo } from "../components/okwu-logo";
 
 interface DraftCardProps {
@@ -106,10 +107,12 @@ export const DraftCard: React.FC<DraftCardProps> = ({
     setErrorMessage(null);
     setInsertSuccessMessage(null);
     setMatchedHighlight(null);
+    setDraftText("");
 
     const activeTarget = targetOverride || jobTarget;
 
-    chrome.runtime.sendMessage(
+    // The note appears in the textarea as the model writes it
+    streamGeneration<GenerateDraftResponse>(
       {
         type: "GENERATE_DRAFT",
         payload: {
@@ -118,6 +121,8 @@ export const DraftCard: React.FC<DraftCardProps> = ({
           jobTargetOverride: activeTarget.enabled ? activeTarget : undefined,
         },
       },
+      (draftSoFar) => setDraftText(draftSoFar),
+    ).then(
       (response: ExtensionMessageResponse<GenerateDraftResponse>) => {
         setIsLoading(false);
         if (response && response.success && response.data?.draftText) {
@@ -130,6 +135,7 @@ export const DraftCard: React.FC<DraftCardProps> = ({
             setMatchedHighlight(response.data.matchedHighlight);
           }
         } else {
+          setDraftText("");
           setErrorMessage(
             response?.error ||
               "Failed to generate connection note. Please check your settings.",
@@ -417,12 +423,12 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                   ? "Drafting a conversation-starting note with AI..."
                   : "Draft note appears here..."
               }
-              disabled={isLoading}
+              readOnly={isLoading}
               rows={4}
               aria-label="Personalized connection note draft"
               className="w-full resize-none rounded-xl border border-slate-300 bg-white p-3.5 text-sm leading-relaxed text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 disabled:bg-slate-50 disabled:text-slate-400"
             />
-            {isLoading && (
+            {isLoading && !draftText && (
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/90">
                 <div className="flex items-center gap-2.5 text-sm font-bold text-blue-600">
                   <RefreshCw className="h-5 w-5 animate-spin" />

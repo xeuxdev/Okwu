@@ -2,13 +2,11 @@ import { createRoot, Root } from 'react-dom/client';
 import { extractTargetProfileFromDom } from './dom-extractor';
 import { DraftCard } from './draft-card';
 import { findNoteTextarea, insertNoteIntoLinkedIn } from './note-injector';
-import {
-  ExtensionMessageResponse,
-  ExtensionSettings,
-  GenerateDraftResponse
-} from '../types/extension-types';
+import { GenerateDraftResponse } from '../types/extension-types';
 import { checkAndAutofillComments } from './comment-manager';
 import { checkAndInjectMessageButtons } from './message-manager';
+import { getCachedSettings } from './settings-cache';
+import { streamGeneration } from './stream-client';
 
 let currentShadowHost: HTMLDivElement | null = null;
 let currentReactRoot: Root | null = null;
@@ -360,11 +358,11 @@ async function checkAndAutofillNote() {
   if (textarea.getAttribute('data-ai-autofilled') === 'true') return;
   if (textarea.value.trim().length > 0) return;
 
-  chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response: ExtensionMessageResponse<ExtensionSettings>) => {
-    if (!response?.data) return;
-    const settings = response.data;
+  getCachedSettings().then((settings) => {
+    if (!settings) return;
     if (settings.autoFillNote === false) return;
     if (settings.useCustomApiKey && !settings.openaiApiKey) return;
+    if (isAutofilling || textarea === lastHandledTextarea) return;
 
     isAutofilling = true;
     lastHandledTextarea = textarea;
@@ -372,8 +370,15 @@ async function checkAndAutofillNote() {
 
     showAutofillToast('Okwu: Drafting authentic note...');
 
+    // Show the note in the textarea as it is written; the final insert below fires LinkedIn's input events
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    const showPartial = (text: string) => {
+      if (nativeSetter) nativeSetter.call(textarea, text);
+      else textarea.value = text;
+    };
+
     const targetProfile = extractTargetProfileFromDom();
-    chrome.runtime.sendMessage(
+    streamGeneration<GenerateDraftResponse>(
       {
         type: 'GENERATE_DRAFT',
         payload: {
@@ -381,19 +386,20 @@ async function checkAndAutofillNote() {
           jobTargetOverride: settings.jobTargetSettings?.enabled ? settings.jobTargetSettings : undefined
         }
       },
-      async (draftResponse: ExtensionMessageResponse<GenerateDraftResponse>) => {
-        isAutofilling = false;
-        if (draftResponse?.success && draftResponse.data?.draftText) {
-          const draft = draftResponse.data.draftText;
-          await insertNoteIntoLinkedIn(draft);
-          textarea.setAttribute('data-ai-autofilled', 'true');
-          showAutofillToast(`Okwu note auto-filled (${draft.length}/200 chars)`, true);
-        } else {
-          removeAutofillToast();
-          textarea.removeAttribute('data-ai-autofilled');
-        }
+      showPartial
+    ).then(async (draftResponse) => {
+      isAutofilling = false;
+      if (draftResponse?.success && draftResponse.data?.draftText) {
+        const draft = draftResponse.data.draftText;
+        await insertNoteIntoLinkedIn(draft);
+        textarea.setAttribute('data-ai-autofilled', 'true');
+        showAutofillToast(`Okwu note auto-filled (${draft.length}/200 chars)`, true);
+      } else {
+        showPartial('');
+        removeAutofillToast();
+        textarea.removeAttribute('data-ai-autofilled');
       }
-    );
+    });
   });
 }
 
@@ -488,14 +494,11 @@ function injectFloatingTrigger() {
   floatingTrigger = floating;
 }
 
-let commentPollInterval: ReturnType<typeof setInterval> | null = null;
 let messagePollInterval: ReturnType<typeof setInterval> | null = null;
 
 function updateInjection() {
-  // Comment checking runs across all LinkedIn pages (feed, posts, profile activity)
-  if (!commentPollInterval) {
-    commentPollInterval = setInterval(checkAndAutofillComments, 600);
-  }
+  // Comment checking runs across all LinkedIn pages (feed, posts, profile activity); the
+  // MutationObserver below catches new comment boxes, so no polling is needed for them
   checkAndAutofillComments();
 
   // The chat overlay lives in a shadow root the MutationObserver can't see, so also poll for it
@@ -512,9 +515,9 @@ function updateInjection() {
       floatingTrigger.style.display = 'flex';
     }
 
-    // Start background watcher for instant autofill of connection notes
+    // The invite modal can render inside a shadow root the MutationObserver can't see, so poll for it too
     if (!autofillPollInterval) {
-      autofillPollInterval = setInterval(checkAndAutofillNote, 450);
+      autofillPollInterval = setInterval(checkAndAutofillNote, 1000);
     }
   } else {
     if (floatingTrigger) {
@@ -535,13 +538,22 @@ function updateInjection() {
 // Initial run
 updateInjection();
 
-// Observe DOM mutations to handle client-side route transitions, modal opens, and comment box expansions
+// Observe DOM mutations to handle client-side route transitions, modal opens, and comment box expansions.
+// LinkedIn mutates the DOM constantly, so checks are throttled to at most one pass per interval.
+const MUTATION_CHECK_INTERVAL_MS = 200;
 let lastUrl = window.location.href;
-const observer = new MutationObserver(() => {
+let mutationCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+function runMutationChecks() {
+  mutationCheckTimer = null;
+
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     updateInjection();
-  } else if (isLinkedInProfilePage()) {
+    return;
+  }
+
+  if (isLinkedInProfilePage()) {
     if (!document.getElementById('linkedin-ai-draft-note-btn')) {
       injectProfileButton();
     }
@@ -554,6 +566,12 @@ const observer = new MutationObserver(() => {
 
   // Check if a message window or thread opened
   checkAndInjectMessageButtons();
+}
+
+const observer = new MutationObserver(() => {
+  if (!mutationCheckTimer) {
+    mutationCheckTimer = setTimeout(runMutationChecks, MUTATION_CHECK_INTERVAL_MS);
+  }
 });
 
 observer.observe(document.body, {

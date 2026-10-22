@@ -11,27 +11,8 @@ import {
   resolveEffectiveApiKeyAndModel,
   selectRelevantFactsForTarget,
 } from "./openai-service";
-import {
-  buildDirectMessageSystemPrompt,
-  parseDirectMessageResponseJson,
-  sanitizePunctuation,
-} from "./prompt-engine";
-
-interface OpenAiChatCompletionResponse {
-  id: string;
-  choices: Array<{
-    message: {
-      role: string;
-      content: string | null;
-    };
-    finish_reason: string;
-  }>;
-  error?: {
-    message: string;
-    type: string;
-    code?: string;
-  };
-}
+import { buildDirectMessageSystemPrompt, DraftStreamParser } from "./prompt-engine";
+import { DEFAULT_MODEL, streamChatCompletion } from "./openai-stream";
 
 const INTENT_GUIDANCE: Record<MessageIntent, string> = {
   auto: "No intent chosen. Pick the most natural reason to message this person from what you know.",
@@ -88,7 +69,7 @@ function formatThreadHistory(conversation: ConversationContext): string {
 
 export async function generateDirectMessage(
   apiKey: string = "",
-  model: string = "gpt-6-luna",
+  model: string = DEFAULT_MODEL,
   userProfile: UserProfile,
   stylePreferences: StylePreferences,
   conversation: ConversationContext,
@@ -96,6 +77,8 @@ export async function generateDirectMessage(
   brief?: string,
   baseFactSheet?: BaseFactSheet,
   jobTargetSettings?: JobTargetSettings,
+  /** Receives the message text written so far while the model is still streaming */
+  onDraft?: (draftSoFar: string) => void,
 ): Promise<GenerateMessageResponse> {
   const resolved = resolveEffectiveApiKeyAndModel(
     apiKey,
@@ -103,7 +86,7 @@ export async function generateDirectMessage(
     Boolean(apiKey.trim()),
   );
   const cleanKey = resolved.apiKey || apiKey.trim();
-  const effectiveModel = resolved.model || model || "gpt-6-luna";
+  const effectiveModel = resolved.model || model || DEFAULT_MODEL;
 
   if (!cleanKey) {
     return {
@@ -147,65 +130,47 @@ export async function generateDirectMessage(
       ? `User's style preference: ${stylePreferences.customInstructions}`
       : "",
     stylePreferences.thingsToAvoid ? `Avoid: ${stylePreferences.thingsToAvoid}` : "",
-    `Fill in "understanding" first, then write 3 message options grounded in it. Respond in valid JSON matching the schema.`,
+    `Reply in the UNDERSTANDING / MOVE / MESSAGE format.`,
   ]
     .filter(Boolean)
     .join("\n\n");
 
+  const parser = new DraftStreamParser("MESSAGE");
+  let lastSentDraft = "";
+
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${cleanKey}`,
+    const result = await streamChatCompletion({
+      apiKey: cleanKey,
+      model: effectiveModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      maxCompletionTokens: 1200,
+      reasoningEffort: "low",
+      serviceTier: "fast",
+      onText: (fullText) => {
+        if (!onDraft) return;
+        parser.update(fullText);
+        const draftSoFar = parser.draft;
+        if (draftSoFar && draftSoFar !== lastSentDraft) {
+          lastSentDraft = draftSoFar;
+          onDraft(draftSoFar);
+        }
       },
-      body: JSON.stringify({
-        model: effectiveModel || "gpt-6-luna",
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_completion_tokens: 2500,
-      }),
     });
 
-    const data = (await response.json()) as OpenAiChatCompletionResponse;
-
-    if (!response.ok) {
-      const errorMsg =
-        data.error?.message || `OpenAI API returned HTTP ${response.status}`;
-      return { success: false, error: errorMsg };
-    }
-
-    const choice = data.choices?.[0];
-    const rawContent = choice?.message?.content?.trim() || "";
-
-    if (!rawContent) {
-      const reason = choice?.finish_reason;
-      return {
-        success: false,
-        error: `Model returned empty response${reason ? ` (${reason})` : ""}. Please retry.`,
-      };
-    }
-
-    const parsed = parseDirectMessageResponseJson(rawContent);
-    const messageText = sanitizePunctuation(parsed.messageText.trim());
+    parser.update(result.text);
+    const messageText = parser.finalDraft;
 
     if (!messageText) {
       return {
         success: false,
-        error: "Unable to generate a suitable message. Please retry.",
+        error: `Model returned an empty message${result.finishReason ? ` (${result.finishReason})` : ""}. Please retry.`,
       };
     }
 
-    return {
-      success: true,
-      messageText,
-      options: parsed.options,
-      recommendedReason: parsed.recommendedReason,
-      risk: parsed.risk,
-    };
+    return { success: true, messageText };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: `Failed to generate message: ${message}` };

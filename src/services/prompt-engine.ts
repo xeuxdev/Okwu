@@ -1,6 +1,4 @@
 import {
-  CommentOption,
-  MessageOption,
   NoteOption,
   UserProfile,
   BaseFactSheet,
@@ -94,7 +92,7 @@ The goal is a comment a real person in the author's network would type in 20 sec
 
 ${userGroundTruth}
 
-STEP 1: UNDERSTAND THE POST FIRST (write this into "understanding" before drafting anything):
+STEP 1: UNDERSTAND THE POST FIRST (think through these, then summarize them on the UNDERSTANDING line before drafting):
 - what_happened: in plain words, what is the author actually telling people? Name the concrete specifics (who, what, where, numbers, names of companies/products/people). If the post is long, find the actual point, not the first line.
 - author_intent: why did they post it? (sharing a win, announcing, asking for help, venting, teaching, joking, hiring, reflecting)
 - author_mood: proud, excited, grateful, frustrated, sad, playful, serious, etc.
@@ -140,29 +138,14 @@ HARD RULES:
 2. Never promote the user, ask to connect, or invite a DM.
 3. Don't pretend to be an expert in something outside the user's profile.
 
-OUTPUT FORMAT (valid JSON, fields in this order):
-{
-  "understanding": {
-    "what_happened": "...",
-    "author_intent": "...",
-    "author_mood": "...",
-    "unclear": "...",
-    "good_reply": "..."
-  },
-  "post_type": "milestone" | "announcement" | "technical" | "opinion" | "humor" | "help_request" | "hiring" | "vulnerable" | "bait" | "other",
-  "confidence": "high" | "medium" | "low",
-  "options": [
-    { "move": "congrats" | "well_wishes" | "clarifying_question" | "banter" | "peer_take", "comment": "..." },
-    { "move": "...", "comment": "..." },
-    { "move": "...", "comment": "..." }
-  ],
-  "recommended": "the single best comment text from options",
-  "recommended_reason": "one sentence why this fits the post and author",
-  "risk": "one line on anything that could land wrong",
-  "skip": false,
-  "skip_reason": ""
-}
-The 3 options must use at least 2 different moves. If no genuine comment exists, set "skip": true with a one-line "skip_reason" and empty options.`;
+OUTPUT FORMAT (plain text, exactly these three labeled parts, nothing else):
+UNDERSTANDING: <one short sentence, under 25 words: what happened, the author's intent and mood>
+MOVE: <congrats | well_wishes | clarifying_question | banter | peer_take>
+COMMENT:
+<the single comment, exactly as it should be posted>
+
+If no genuine comment exists, output only one line instead:
+SKIP: <one-line reason>`;
 }
 
 export function buildConnectionNoteSystemPrompt(
@@ -191,195 +174,60 @@ HARD RULES:
 8. Banned openers and phrases: "Hope you are doing well", "Came across your profile", "I was impressed by", "Great work on", "I would love to connect".
 9. Banned vocabulary: pivotal, transformative, groundbreaking, testament, journey, leverage, unlock, seamless, cutting-edge.
 
-OUTPUT FORMAT:
-Respond with a valid JSON object matching this structure:
-{
-  "relationship_type": "peer_engineer" | "founder_or_leader" | "recruiter_or_hiring_manager" | "peer_builder" | "general",
-  "options": [
-    { "move": "move name (e.g. shared stack)", "text": "note draft under 200 chars" },
-    { "move": "move name (e.g. specific question)", "text": "note draft under 200 chars" },
-    { "move": "move name (e.g. direct peer angle)", "text": "note draft under 200 chars" }
-  ],
-  "recommended": "the single best note draft strictly under 200 characters",
-  "recommended_reason": "one sentence why",
-  "risk": "one line risk assessment"
-}`;
+OUTPUT FORMAT (plain text, exactly these labeled lines, nothing else):
+RELATIONSHIP: <peer_engineer | founder_or_leader | recruiter_or_hiring_manager | peer_builder | general>
+NOTE:
+<the single best note, one paragraph, strictly under 200 characters>
+ALT (<move name, e.g. specific question>): <a different note strictly under 200 characters>
+ALT (<move name, e.g. shared stack>): <a different note strictly under 200 characters>
+REASON: <one short sentence on why NOTE is the best pick>`;
 }
 
-export interface ParsedCommentOutput {
-  commentText: string;
-  postType?: string;
-  confidence?: "high" | "medium" | "low";
-  options?: CommentOption[];
+/**
+ * Reads the ALT and REASON lines from a finished connection note reply.
+ */
+export function parseNoteExtras(rawText: string): {
+  options: NoteOption[];
   recommendedReason?: string;
-  risk?: string;
-  skip?: boolean;
-  skipReason?: string;
+} {
+  const options: NoteOption[] = [];
+  const altRegex = /^\s*ALT(?:\s*\(([^)]*)\))?\s*:\s*(.+)$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = altRegex.exec(rawText))) {
+    const text = cleanDraft(match[2]);
+    if (text) options.push({ move: (match[1] || "").trim(), text });
+  }
+  const reason = rawText.match(/^\s*REASON:\s*(.+)$/m)?.[1]?.trim();
+  return { options, recommendedReason: reason || undefined };
 }
 
-export function parseCommentResponseJson(rawText: string): ParsedCommentOutput {
-  const cleanRaw = rawText.trim();
-
-  if (/^SKIP\b/i.test(cleanRaw)) {
-    const reason = cleanRaw.replace(/^SKIP[:\s-]*/i, "").trim();
-    return {
-      commentText: "",
-      skip: true,
-      skipReason: reason || "No genuine comment exists for this post.",
-    };
-  }
-
-  const jsonMatch = cleanRaw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        post_type?: string;
-        confidence?: "high" | "medium" | "low";
-        options?: Array<{ move?: string; comment?: string; text?: string }>;
-        recommended?: string;
-        recommended_reason?: string;
-        risk?: string;
-        skip?: boolean;
-        skip_reason?: string;
-      };
-
-      if (parsed.skip || /^SKIP\b/i.test(parsed.recommended || "")) {
-        return {
-          commentText: "",
-          skip: true,
-          skipReason:
-            parsed.skip_reason || "No genuine comment exists for this post.",
-        };
-      }
-
-      const options: CommentOption[] = Array.isArray(parsed.options)
-        ? parsed.options
-            .map((o) => ({
-              move: String(o.move || "").trim(),
-              comment: sanitizePunctuation(String(o.comment || o.text || "")),
-            }))
-            .filter((o) => o.comment.length > 0)
-        : [];
-
-      let recommended = sanitizePunctuation(parsed.recommended || "");
-      if (!recommended && options.length > 0) {
-        recommended = options[0].comment;
-      }
-
-      if (
-        (recommended.startsWith('"') && recommended.endsWith('"')) ||
-        (recommended.startsWith("'") && recommended.endsWith("'"))
-      ) {
-        recommended = recommended.slice(1, -1).trim();
-      }
-
-      return {
-        commentText: recommended,
-        postType: parsed.post_type,
-        confidence: parsed.confidence,
-        options,
-        recommendedReason: parsed.recommended_reason,
-        risk: parsed.risk,
-        skip: false,
-      };
-    } catch {
-      // Fallback to text parsing
-    }
-  }
-
-  const recommendedMatch = cleanRaw.match(
-    /recommended(?:\s*comment)?\s*:\s*["']?([^"\n\r]+)["']?/i,
+/**
+ * Picks the first note that fits LinkedIn's limit, preferring the recommended one.
+ */
+export function pickNoteWithinLimit(
+  recommended: string,
+  alternatives: NoteOption[],
+  limit: number = 200,
+): string | undefined {
+  return [recommended, ...alternatives.map((o) => o.text)].find(
+    (text) => text.length > 0 && text.length <= limit,
   );
-  if (recommendedMatch && recommendedMatch[1]) {
-    return {
-      commentText: sanitizePunctuation(recommendedMatch[1].trim()),
-      skip: false,
-    };
-  }
-
-  return {
-    commentText: sanitizePunctuation(cleanRaw.replace(/^["']|["']$/g, "")),
-    skip: false,
-  };
 }
 
-export interface ParsedNoteOutput {
-  draftText: string;
-  options?: NoteOption[];
-  recommendedReason?: string;
-  risk?: string;
-}
-
-export function parseConnectionNoteResponseJson(
-  rawText: string,
-): ParsedNoteOutput {
-  const cleanRaw = rawText.trim();
-
-  const jsonMatch = cleanRaw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        options?: Array<{ move?: string; text?: string; note?: string }>;
-        recommended?: string;
-        recommended_reason?: string;
-        risk?: string;
-      };
-
-      const options: NoteOption[] = Array.isArray(parsed.options)
-        ? parsed.options
-            .map((o) => ({
-              move: String(o.move || "").trim(),
-              text: sanitizePunctuation(String(o.text || o.note || "")),
-            }))
-            .filter((o) => o.text.length > 0)
-        : [];
-
-      let recommended = sanitizePunctuation(parsed.recommended || "");
-      if (!recommended && options.length > 0) {
-        recommended = options[0].text;
-      }
-
-      if (
-        (recommended.startsWith('"') && recommended.endsWith('"')) ||
-        (recommended.startsWith("'") && recommended.endsWith("'"))
-      ) {
-        recommended = recommended.slice(1, -1).trim();
-      }
-
-      if (recommended.length > 200) {
-        recommended = recommended.slice(0, 197).trim() + "...";
-      }
-
-      return {
-        draftText: recommended,
-        options,
-        recommendedReason: parsed.recommended_reason,
-        risk: parsed.risk,
-      };
-    } catch {
-      // Fallback to text parsing
-    }
-  }
-
-  const recommendedMatch = cleanRaw.match(
-    /recommended(?:\s*note)?\s*:\s*["']?([^"\n\r]+)["']?/i,
+/**
+ * Last-resort trim to the limit at a sentence or word boundary, without a trailing ellipsis.
+ */
+export function trimToLimit(text: string, limit: number = 200): string {
+  if (text.length <= limit) return text;
+  const truncated = text.slice(0, limit);
+  const lastSentenceEnd = Math.max(
+    truncated.lastIndexOf(". "),
+    truncated.lastIndexOf("? "),
+    truncated.lastIndexOf("! "),
   );
-  if (recommendedMatch && recommendedMatch[1]) {
-    let note = sanitizePunctuation(recommendedMatch[1].trim());
-    if (note.length > 200) note = note.slice(0, 197).trim() + "...";
-    return {
-      draftText: note,
-    };
-  }
-
-  let finalNote = sanitizePunctuation(cleanRaw.replace(/^["']|["']$/g, ""));
-  if (finalNote.length > 200) {
-    finalNote = finalNote.slice(0, 197).trim() + "...";
-  }
-
-  return {
-    draftText: finalNote,
-  };
+  if (lastSentenceEnd > limit * 0.6) return truncated.slice(0, lastSentenceEnd + 1);
+  const lastSpace = truncated.lastIndexOf(" ");
+  return (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated).replace(/[,;:]$/, "");
 }
 
 export function buildDirectMessageSystemPrompt(
@@ -393,7 +241,7 @@ The goal is a message that reads like a real person typed it to someone specific
 
 ${userGroundTruth}
 
-STEP 1: UNDERSTAND THE SITUATION (write this into "understanding" before drafting):
+STEP 1: UNDERSTAND THE SITUATION (think through these, then summarize them on the UNDERSTANDING line before drafting):
 - relationship: who the recipient is relative to the user (1st-degree connection, stranger, existing conversation) and what you actually know about them.
 - purpose: why the user is messaging. Use the user's brief and chosen intent if given. If neither is given, pick the most natural reason from what you know; if there is no real reason, a short friendly hello with one genuine question is fine.
 - hook: the one specific, true thing to anchor on (their role, company, a recent post, a shared field, something said earlier in the thread). If there is nothing specific, say so and keep the message short instead of inventing one.
@@ -431,80 +279,85 @@ HARD RULES:
 2. Never claim to have read or seen something of theirs unless it is in the provided data.
 3. If the user's brief conflicts with these style rules, follow the brief's content but keep the human style.
 
-OUTPUT FORMAT (valid JSON, fields in this order):
-{
-  "understanding": {
-    "relationship": "...",
-    "purpose": "...",
-    "hook": "...",
-    "ask": "..."
-  },
-  "options": [
-    { "move": "short label, e.g. direct ask", "text": "full message" },
-    { "move": "...", "text": "..." },
-    { "move": "...", "text": "..." }
-  ],
-  "recommended": "the single best full message text from options",
-  "recommended_reason": "one sentence why",
-  "risk": "one line on anything that could land wrong"
-}`;
+OUTPUT FORMAT (plain text, exactly these three labeled parts, nothing else):
+UNDERSTANDING: <one short sentence, under 25 words: relationship, purpose, hook and ask>
+MOVE: <short label, e.g. direct ask>
+MESSAGE:
+<the single full message, exactly as it should be sent>`;
 }
 
-export interface ParsedMessageOutput {
-  messageText: string;
-  options?: MessageOption[];
-  recommendedReason?: string;
-  risk?: string;
-}
+/**
+ * Parses the labeled plain-text draft format (UNDERSTANDING / MOVE / COMMENT or MESSAGE, or
+ * RELATIONSHIP / NOTE / ALT) incrementally, so the draft can be shown while the model is still writing it.
+ */
+export class DraftStreamParser {
+  private text = "";
 
-export function parseDirectMessageResponseJson(
-  rawText: string,
-): ParsedMessageOutput {
-  const cleanRaw = rawText.trim();
+  /**
+   * @param endsAtLineBreak The draft is a single paragraph followed by more labeled lines (NOTE)
+   */
+  constructor(
+    private readonly draftLabel: "COMMENT" | "MESSAGE" | "NOTE",
+    private readonly endsAtLineBreak: boolean = false,
+  ) {}
 
-  const jsonMatch = cleanRaw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        options?: Array<{ move?: string; text?: string; message?: string }>;
-        recommended?: string;
-        recommended_reason?: string;
-        risk?: string;
-      };
-
-      const options: MessageOption[] = Array.isArray(parsed.options)
-        ? parsed.options
-            .map((o) => ({
-              move: String(o.move || "").trim(),
-              text: sanitizePunctuation(String(o.text || o.message || "")),
-            }))
-            .filter((o) => o.text.length > 0)
-        : [];
-
-      let recommended = sanitizePunctuation(parsed.recommended || "");
-      if (!recommended && options.length > 0) {
-        recommended = options[0].text;
-      }
-
-      if (
-        (recommended.startsWith('"') && recommended.endsWith('"')) ||
-        (recommended.startsWith("'") && recommended.endsWith("'"))
-      ) {
-        recommended = recommended.slice(1, -1).trim();
-      }
-
-      return {
-        messageText: recommended,
-        options,
-        recommendedReason: parsed.recommended_reason,
-        risk: parsed.risk,
-      };
-    } catch {
-      // Fallback to raw text
-    }
+  /** Replaces the parser's view with the full text received so far. */
+  update(fullText: string): void {
+    this.text = fullText;
   }
 
-  return {
-    messageText: sanitizePunctuation(cleanRaw.replace(/^["']|["']$/g, "")),
-  };
+  get skipReason(): string | undefined {
+    const match = this.text.match(/^\s*SKIP:\s*(.*)$/m);
+    return match ? match[1].trim() || "No genuine comment exists for this post." : undefined;
+  }
+
+  get move(): string | undefined {
+    const match = this.text.match(/^\s*MOVE:\s*(.+)$/m);
+    return match ? match[1].trim() : undefined;
+  }
+
+  /** True once the draft label has arrived and draft text is streaming. */
+  get hasDraftStarted(): boolean {
+    return this.labelIndex() >= 0;
+  }
+
+  /** The draft written so far (empty until the draft label has arrived). */
+  get draft(): string {
+    const idx = this.labelIndex();
+    if (idx < 0) return "";
+    let raw = this.text.slice(idx);
+    if (this.endsAtLineBreak) {
+      const leading = raw.length - raw.trimStart().length;
+      const lineEnd = raw.indexOf("\n", leading);
+      if (lineEnd >= 0) raw = raw.slice(0, lineEnd);
+    }
+    return cleanDraft(raw);
+  }
+
+  /**
+   * Final draft text. Falls back to the whole reply minus labeled lines
+   * if the model ignored the format.
+   */
+  get finalDraft(): string {
+    if (this.hasDraftStarted) return this.draft;
+    if (this.skipReason) return "";
+    return cleanDraft(
+      this.text
+        .split("\n")
+        .filter((line) => !/^\s*(UNDERSTANDING|MOVE|RELATIONSHIP|REASON|ALT\b[^:]*):/i.test(line))
+        .join("\n"),
+    );
+  }
+
+  private labelIndex(): number {
+    const match = new RegExp(`^\\s*${this.draftLabel}:[ \\t]*\\n?`, "m").exec(this.text);
+    return match ? match.index + match[0].length : -1;
+  }
+}
+
+function cleanDraft(raw: string): string {
+  let draft = sanitizePunctuation(raw);
+  if (draft.startsWith('"')) draft = draft.slice(1);
+  if (draft.endsWith('"') && !draft.slice(0, -1).includes('"')) draft = draft.slice(0, -1);
+  return draft.trim();
 }

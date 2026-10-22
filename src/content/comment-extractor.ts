@@ -183,7 +183,7 @@ function measurePostBodyLength(postContainer: HTMLElement): number {
  * Clicks the post's "see more" toggles and waits until the expanded text has rendered,
  * so the model reads the full post instead of the truncated preview.
  */
-export async function expandPostText(postContainer: HTMLElement, timeoutMs: number = 2000): Promise<void> {
+export async function expandPostText(postContainer: HTMLElement, timeoutMs: number = 1000): Promise<void> {
   const buttons = findSeeMoreButtons(postContainer);
   if (buttons.length === 0) return;
 
@@ -196,13 +196,15 @@ export async function expandPostText(postContainer: HTMLElement, timeoutMs: numb
     }
   }
 
-  // Wait until the text has grown and then stopped changing for two consecutive checks
+  // Wait until the text has grown and then stopped changing; give up early if nothing changes,
+  // since an inline toggle that works re-renders almost immediately
   const start = Date.now();
   let lastLength = initialLength;
   let stableTicks = 0;
   while (Date.now() - start < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const length = measurePostBodyLength(postContainer);
+    if (length === initialLength && Date.now() - start >= 300) return;
     if (length > initialLength && length === lastLength) {
       stableTicks++;
       if (stableTicks >= 2) return;
@@ -459,8 +461,11 @@ export function extractPostContext(postContainer: HTMLElement): PostContext {
   );
 
   for (const commentEl of sduiCommentEls.slice(0, 4)) {
-    const authorEl = commentEl.querySelector('p.ckymff.ckymeh span, a[href*="/in/"]');
-    const textEl = commentEl.querySelector('[data-testid="expandable-text-box"], p.ckymff.ckymeh span');
+    // Hashed class names change between LinkedIn deploys, so fall back to stable attributes
+    const authorEl = commentEl.querySelector('p.ckymff.ckymeh span, a[href*="/in/"] span[aria-hidden="true"], a[href*="/in/"]');
+    const textEl = commentEl.querySelector(
+      '[data-testid="expandable-text-box"], p.ckymff.ckymeh span, .update-components-text'
+    );
 
     const author = cleanText(authorEl?.textContent).replace(/•.*$/, '').trim();
     const text = cleanText(textEl?.textContent);
@@ -500,7 +505,8 @@ export function extractPostContext(postContainer: HTMLElement): PostContext {
     undefined;
 
   return {
-    postAuthorName: postAuthorName || 'Post Author',
+    // Left empty when unknown so the prompt omits the author line instead of naming "Post Author"
+    postAuthorName,
     postAuthorHeadline: postAuthorHeadline || undefined,
     postAuthorProfileUrl: postAuthorProfileUrl || undefined,
     postText: postText,

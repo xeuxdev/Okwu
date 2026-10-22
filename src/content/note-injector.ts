@@ -131,6 +131,12 @@ function findDeepElement<T extends Element = Element>(
 }
 
 export function findNoteTextarea(): HTMLTextAreaElement | null {
+  // Fast path: the common light-DOM invite modal, before walking every element and shadow root
+  const direct = document.querySelector<HTMLTextAreaElement>(
+    'textarea#custom-message, textarea.connect-button-send-invite__custom-message, textarea[name="message"], .artdeco-modal textarea, div[role="dialog"] textarea, .send-invite textarea'
+  );
+  if (direct) return direct;
+
   return findDeepElement<HTMLTextAreaElement>((el) => {
     if (el.tagName.toLowerCase() !== 'textarea') return false;
 

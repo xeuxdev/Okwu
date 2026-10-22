@@ -1,9 +1,14 @@
 import {
   ExtensionMessageType,
   ExtensionMessageResponse,
+  GenerateDraftRequest,
   GenerateDraftResponse,
   GenerateCommentResponse,
   GenerateMessageResponse,
+  GenerateCommentRequest,
+  GenerateMessageRequest,
+  GenerationStreamEvent,
+  GENERATION_PORT_NAME,
   ParseResumeResponse,
   TestConnectionResponse,
   ExtensionSettings
@@ -69,200 +74,213 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
+/**
+ * Streaming channel: the content script connects, sends one GENERATE_COMMENT or
+ * GENERATE_MESSAGE request, receives { event: 'draft' } updates while the model writes,
+ * and a final { event: 'done' } with the same response shape as sendMessage.
+ */
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== GENERATION_PORT_NAME) return;
+
+  let disconnected = false;
+  port.onDisconnect.addListener(() => {
+    disconnected = true;
+  });
+
+  const post = (msg: GenerationStreamEvent) => {
+    if (disconnected) return;
+    try {
+      port.postMessage(msg);
+    } catch {
+      disconnected = true;
+    }
+  };
+
+  port.onMessage.addListener((message: ExtensionMessageType) => {
+    const onDraft = (text: string) => post({ event: 'draft', text });
+    const run =
+      message.type === 'GENERATE_COMMENT'
+        ? runCommentGeneration(message.payload, onDraft)
+        : message.type === 'GENERATE_MESSAGE'
+          ? runMessageGeneration(message.payload, onDraft)
+          : message.type === 'GENERATE_DRAFT'
+            ? runDraftGeneration(message.payload, onDraft)
+            : Promise.resolve<ExtensionMessageResponse<unknown>>({
+                success: false,
+                error: 'Unsupported streaming request.'
+              });
+
+    run
+      .catch((err: unknown) => ({
+        success: false,
+        error: err instanceof Error ? err.message : 'Unknown internal error'
+      }))
+      .then((response) => {
+        post({ event: 'done', response });
+        if (!disconnected) port.disconnect();
+      });
+  });
+});
+
+type GenerationContext =
+  | { ok: false; response: ExtensionMessageResponse<unknown> }
+  | {
+      ok: true;
+      settings: ExtensionSettings;
+      planStatus: ReturnType<typeof getPlanStatus>;
+      apiKey: string;
+      model: string;
+    };
+
+/** Shared plan-limit and API-key checks for metered generations. */
+async function prepareGeneration(): Promise<GenerationContext> {
+  const settings = await getSettings();
+  const planStatus = getPlanStatus(settings);
+
+  if (!planStatus.canGenerate) {
+    return {
+      ok: false,
+      response: {
+        success: false,
+        error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings.',
+        data: {
+          success: false,
+          error: 'Monthly limit reached (3/3 used this month).',
+          monthlyLimitReached: true,
+          messagesRemaining: 0
+        }
+      }
+    };
+  }
+
+  const { apiKey, model } = resolveEffectiveApiKeyAndModel(
+    settings.openaiApiKey,
+    settings.openaiModel,
+    settings.useCustomApiKey
+  );
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      response: {
+        success: false,
+        error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
+      }
+    };
+  }
+
+  return { ok: true, settings, planStatus, apiKey, model };
+}
+
+/** Records usage after a successful generation and attaches plan info to the result. */
+async function finalizeUsage<T extends { planUsed?: string; messagesRemaining?: number }>(
+  ctx: Extract<GenerationContext, { ok: true }>,
+  result: T
+): Promise<ExtensionMessageResponse<T>> {
+  const updatedSettings = recordMessageUsage(ctx.settings);
+  await saveSettings(updatedSettings);
+
+  const updatedStatus = getPlanStatus(updatedSettings);
+  result.planUsed = ctx.planStatus.planLabel;
+  result.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
+
+  return { success: true, data: result };
+}
+
+async function runDraftGeneration(
+  payload: GenerateDraftRequest,
+  onDraft?: (text: string) => void
+): Promise<ExtensionMessageResponse<unknown>> {
+  const ctx = await prepareGeneration();
+  if (!ctx.ok) return ctx.response;
+
+  const effectiveJobTarget = {
+    ...ctx.settings.jobTargetSettings,
+    ...(payload.jobTargetOverride || {})
+  };
+
+  const draftResult: GenerateDraftResponse = await generateConnectionNote(
+    ctx.apiKey,
+    ctx.model,
+    ctx.settings.userProfile,
+    ctx.settings.stylePreferences,
+    payload.targetProfile,
+    payload.customPromptModifier,
+    effectiveJobTarget,
+    ctx.settings.baseFactSheet,
+    onDraft
+  );
+
+  if (!draftResult.success) {
+    return { success: false, error: draftResult.error || 'Failed to generate note.' };
+  }
+  return finalizeUsage(ctx, draftResult);
+}
+
+async function runCommentGeneration(
+  payload: GenerateCommentRequest,
+  onDraft?: (text: string) => void
+): Promise<ExtensionMessageResponse<unknown>> {
+  const ctx = await prepareGeneration();
+  if (!ctx.ok) return ctx.response;
+
+  const commentResult: GenerateCommentResponse = await generatePostComment(
+    ctx.apiKey,
+    ctx.model,
+    ctx.settings.userProfile,
+    ctx.settings.stylePreferences,
+    payload.postContext,
+    payload.customPromptModifier,
+    ctx.settings.baseFactSheet,
+    payload.commentAngle,
+    payload.previousDrafts,
+    onDraft
+  );
+
+  if (!commentResult.success) {
+    return { success: false, error: commentResult.error || 'Failed to generate comment.' };
+  }
+  return finalizeUsage(ctx, commentResult);
+}
+
+async function runMessageGeneration(
+  payload: GenerateMessageRequest,
+  onDraft?: (text: string) => void
+): Promise<ExtensionMessageResponse<unknown>> {
+  const ctx = await prepareGeneration();
+  if (!ctx.ok) return ctx.response;
+
+  const messageResult: GenerateMessageResponse = await generateDirectMessage(
+    ctx.apiKey,
+    ctx.model,
+    ctx.settings.userProfile,
+    ctx.settings.stylePreferences,
+    payload.conversation,
+    payload.intent,
+    payload.brief,
+    ctx.settings.baseFactSheet,
+    ctx.settings.jobTargetSettings,
+    onDraft
+  );
+
+  if (!messageResult.success) {
+    return { success: false, error: messageResult.error || 'Failed to generate message.' };
+  }
+  return finalizeUsage(ctx, messageResult);
+}
+
 async function handleMessage(
   message: ExtensionMessageType
 ): Promise<ExtensionMessageResponse<unknown>> {
   switch (message.type) {
-    case 'GENERATE_DRAFT': {
-      const settings = await getSettings();
-      const planStatus = getPlanStatus(settings);
+    case 'GENERATE_DRAFT':
+      return runDraftGeneration(message.payload);
 
-      if (!planStatus.canGenerate) {
-        return {
-          success: false,
-          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings for unlimited notes.',
-          data: {
-            success: false,
-            error: 'Monthly free trial limit reached (3/3 notes used this month).',
-            monthlyLimitReached: true,
-            messagesRemaining: 0
-          } as GenerateDraftResponse
-        };
-      }
+    case 'GENERATE_COMMENT':
+      return runCommentGeneration(message.payload);
 
-      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
-        settings.openaiApiKey,
-        settings.openaiModel,
-        settings.useCustomApiKey
-      );
-
-      if (!apiKey) {
-        return {
-          success: false,
-          error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
-        };
-      }
-
-      const effectiveJobTarget = {
-        ...settings.jobTargetSettings,
-        ...(message.payload.jobTargetOverride || {})
-      };
-
-      const draftResult: GenerateDraftResponse = await generateConnectionNote(
-        apiKey,
-        model,
-        settings.userProfile,
-        settings.stylePreferences,
-        message.payload.targetProfile,
-        message.payload.customPromptModifier,
-        effectiveJobTarget,
-        settings.baseFactSheet
-      );
-
-      if (!draftResult.success) {
-        return {
-          success: false,
-          error: draftResult.error || 'Failed to generate note.'
-        };
-      }
-
-      // Record message usage and save settings
-      const updatedSettings = recordMessageUsage(settings);
-      await saveSettings(updatedSettings);
-
-      const updatedStatus = getPlanStatus(updatedSettings);
-      draftResult.planUsed = planStatus.planLabel;
-      draftResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
-
-      return {
-        success: true,
-        data: draftResult
-      };
-    }
-
-    case 'GENERATE_COMMENT': {
-      const settings = await getSettings();
-      const planStatus = getPlanStatus(settings);
-
-      if (!planStatus.canGenerate) {
-        return {
-          success: false,
-          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings.',
-          data: {
-            success: false,
-            error: 'Monthly limit reached (3/3 used this month).',
-            monthlyLimitReached: true,
-            messagesRemaining: 0
-          } as GenerateCommentResponse
-        };
-      }
-
-      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
-        settings.openaiApiKey,
-        settings.openaiModel,
-        settings.useCustomApiKey
-      );
-
-      if (!apiKey) {
-        return {
-          success: false,
-          error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
-        };
-      }
-
-      const commentResult: GenerateCommentResponse = await generatePostComment(
-        apiKey,
-        model,
-        settings.userProfile,
-        settings.stylePreferences,
-        message.payload.postContext,
-        message.payload.customPromptModifier,
-        settings.baseFactSheet,
-        message.payload.commentAngle
-      );
-
-      if (!commentResult.success) {
-        return {
-          success: false,
-          error: commentResult.error || 'Failed to generate comment.'
-        };
-      }
-
-      // Record usage and persist settings
-      const updatedSettings = recordMessageUsage(settings);
-      await saveSettings(updatedSettings);
-
-      const updatedStatus = getPlanStatus(updatedSettings);
-      commentResult.planUsed = planStatus.planLabel;
-      commentResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
-
-      return {
-        success: true,
-        data: commentResult
-      };
-    }
-
-    case 'GENERATE_MESSAGE': {
-      const settings = await getSettings();
-      const planStatus = getPlanStatus(settings);
-
-      if (!planStatus.canGenerate) {
-        return {
-          success: false,
-          error: 'You have used your 3 free messages for this month. Upgrade to Pro ($5/month) or switch to BYOK in settings.',
-          data: {
-            success: false,
-            error: 'Monthly limit reached (3/3 used this month).',
-            monthlyLimitReached: true,
-            messagesRemaining: 0
-          } as GenerateMessageResponse
-        };
-      }
-
-      const { apiKey, model } = resolveEffectiveApiKeyAndModel(
-        settings.openaiApiKey,
-        settings.openaiModel,
-        settings.useCustomApiKey
-      );
-
-      if (!apiKey) {
-        return {
-          success: false,
-          error: 'AI service is not configured. Please open Extension Settings to enable Cloud Plan or enter your OpenAI key.'
-        };
-      }
-
-      const messageResult: GenerateMessageResponse = await generateDirectMessage(
-        apiKey,
-        model,
-        settings.userProfile,
-        settings.stylePreferences,
-        message.payload.conversation,
-        message.payload.intent,
-        message.payload.brief,
-        settings.baseFactSheet,
-        settings.jobTargetSettings
-      );
-
-      if (!messageResult.success) {
-        return {
-          success: false,
-          error: messageResult.error || 'Failed to generate message.'
-        };
-      }
-
-      const updatedSettings = recordMessageUsage(settings);
-      await saveSettings(updatedSettings);
-
-      const updatedStatus = getPlanStatus(updatedSettings);
-      messageResult.planUsed = planStatus.planLabel;
-      messageResult.messagesRemaining = updatedStatus.isFreeTrial ? updatedStatus.messagesRemaining : undefined;
-
-      return {
-        success: true,
-        data: messageResult
-      };
-    }
+    case 'GENERATE_MESSAGE':
+      return runMessageGeneration(message.payload);
 
     case 'PARSE_RESUME_TO_FACT_SHEET': {
       const settings = await getSettings();

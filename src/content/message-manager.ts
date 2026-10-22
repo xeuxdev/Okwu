@@ -1,13 +1,12 @@
 import {
   ConversationContext,
-  ExtensionMessageResponse,
   GenerateMessageResponse,
   MessageIntent,
   ThreadMessage
 } from '../types/extension-types';
 import { extractTargetProfileFromDom } from './dom-extractor';
-import { insertCommentIntoEditor } from './comment-injector';
 import { showCommentToast } from './comment-manager';
+import { createEditorStreamWriter, streamGeneration } from './stream-client';
 
 const MESSAGE_EDITOR_SELECTOR = 'div.msg-form__contenteditable[contenteditable="true"]';
 const CONVERSATION_CONTAINER_SELECTOR =
@@ -215,35 +214,38 @@ async function generateMessage(
   setButtonBusy(btn, true);
   showCommentToast(`Okwu: Drafting message to ${conversation.recipientName.split(/\s+/)[0]}...`);
 
-  chrome.runtime.sendMessage(
+  // Type the message into the box as the model writes it
+  const writer = createEditorStreamWriter(editor);
+  const response = await streamGeneration<GenerateMessageResponse>(
     {
       type: 'GENERATE_MESSAGE',
       payload: { conversation, intent, brief: brief || undefined }
     },
-    async (response: ExtensionMessageResponse<GenerateMessageResponse>) => {
-      isGeneratingMessage = false;
-      setButtonBusy(btn, false);
-
-      if (chrome.runtime.lastError) {
-        showCommentToast('AI Error: Extension was reloaded. Refresh the page and retry.', true);
-        return;
-      }
-
-      const text = response?.data?.messageText;
-      if (response?.success && text) {
-        await insertCommentIntoEditor(editor, text);
-        showCommentToast(
-          'Okwu message drafted, review before sending',
-          true,
-          () => generateMessage(editor, intent, btn, brief),
-          'Try another'
-        );
-      } else {
-        const errorMsg = response?.error || response?.data?.error || 'Failed to generate message.';
-        showCommentToast(`AI Error: ${errorMsg}`, true);
-      }
-    }
+    (draftSoFar) => writer.update(draftSoFar)
   );
+
+  isGeneratingMessage = false;
+  setButtonBusy(btn, false);
+
+  const text = response?.data?.messageText;
+  if (response?.success && text) {
+    await writer.finish(text);
+    showCommentToast(
+      'Okwu message drafted, review before sending',
+      true,
+      () => generateMessage(editor, intent, btn, brief),
+      'Try another'
+    );
+  } else {
+    // Put back what the user had typed instead of leaving a half-written draft
+    if (brief) {
+      await writer.finish(brief);
+    } else {
+      await writer.clear();
+    }
+    const errorMsg = response?.error || response?.data?.error || 'Failed to generate message.';
+    showCommentToast(`AI Error: ${errorMsg}`, true);
+  }
 }
 
 function openIntentMenu(editor: HTMLElement, btn: HTMLButtonElement): void {

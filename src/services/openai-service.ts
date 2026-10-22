@@ -13,9 +13,13 @@ import {
 } from "../types/extension-types";
 import {
   buildConnectionNoteSystemPrompt,
-  parseConnectionNoteResponseJson,
+  DraftStreamParser,
+  parseNoteExtras,
+  pickNoteWithinLimit,
   sanitizePunctuation,
+  trimToLimit,
 } from "./prompt-engine";
+import { DEFAULT_MODEL, streamChatCompletion } from "./openai-stream";
 
 interface OpenAiChatCompletionResponse {
   id: string;
@@ -69,7 +73,7 @@ export function resolveEffectiveApiKeyAndModel(
   if (useCustomApiKey && customApiKey.trim()) {
     return {
       apiKey: customApiKey.trim(),
-      model: customModel.trim() || "gpt-6-luna",
+      model: customModel.trim() || DEFAULT_MODEL,
       source: "custom",
     };
   }
@@ -83,7 +87,7 @@ export function resolveEffectiveApiKeyAndModel(
     typeof __DEFAULT_OPENAI_MODEL__ !== "undefined" &&
     __DEFAULT_OPENAI_MODEL__.trim()
       ? __DEFAULT_OPENAI_MODEL__.trim()
-      : "gpt-6-luna";
+      : DEFAULT_MODEL;
 
   if (cloudKey) {
     return {
@@ -96,21 +100,21 @@ export function resolveEffectiveApiKeyAndModel(
   if (customApiKey.trim()) {
     return {
       apiKey: customApiKey.trim(),
-      model: customModel.trim() || "gpt-6-luna",
+      model: customModel.trim() || DEFAULT_MODEL,
       source: "custom",
     };
   }
 
   return {
     apiKey: "",
-    model: cloudModel || "gpt-6-luna",
+    model: cloudModel || DEFAULT_MODEL,
     source: "cloud",
   };
 }
 
 export async function testOpenAiApiKey(
   apiKey: string,
-  model: string = "gpt-6-luna",
+  model: string = DEFAULT_MODEL,
 ): Promise<TestConnectionResponse> {
   const cleanKey = apiKey.trim();
   if (!cleanKey) {
@@ -125,7 +129,7 @@ export async function testOpenAiApiKey(
         Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: model || "gpt-6-luna",
+        model: model || DEFAULT_MODEL,
         messages: [{ role: "user", content: 'Say "OK"' }],
         max_completion_tokens: 1000,
       }),
@@ -139,7 +143,7 @@ export async function testOpenAiApiKey(
       return { success: false, error: errorMsg };
     }
 
-    return { success: true, modelUsed: model || "gpt-6-luna" };
+    return { success: true, modelUsed: model || DEFAULT_MODEL };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: `Failed to connect to OpenAI: ${message}` };
@@ -153,7 +157,7 @@ export async function testOpenAiApiKey(
 export async function parseResumeToBaseFactSheet(
   rawResumeText: string,
   apiKey: string = "",
-  model: string = "gpt-6-luna",
+  model: string = DEFAULT_MODEL,
   linkedInProfile?: LinkedInSelfProfile,
 ): Promise<ParseResumeResponse> {
   const resolved = resolveEffectiveApiKeyAndModel(
@@ -162,7 +166,7 @@ export async function parseResumeToBaseFactSheet(
     Boolean(apiKey.trim()),
   );
   const cleanKey = resolved.apiKey || apiKey.trim();
-  const effectiveModel = resolved.model || model || "gpt-6-luna";
+  const effectiveModel = resolved.model || model || DEFAULT_MODEL;
 
   if (!cleanKey) {
     return {
@@ -238,7 +242,7 @@ Vanity URL: ${linkedInProfile.vanityUrl}`
         Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: effectiveModel || "gpt-6-luna",
+        model: effectiveModel || DEFAULT_MODEL,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
@@ -401,6 +405,13 @@ Vanity URL: ${linkedInProfile.vanityUrl}`
   }
 }
 
+const HOOK_STOPWORDS = new Set([
+  "with", "that", "this", "from", "have", "will", "your", "about", "their", "there",
+  "what", "when", "where", "which", "they", "them", "been", "were", "into", "more",
+  "most", "some", "over", "also", "just", "than", "then", "very", "team", "work",
+  "working", "built", "building", "years", "experience",
+]);
+
 /**
  * Dynamically selects the single most relevant milestone and tech overlap for the target person.
  * Produces an ultra-lean context snippet (~70 to 110 tokens) for note generation.
@@ -442,26 +453,25 @@ export function selectRelevantFactsForTarget(
     .join(" ")
     .toLowerCase();
 
-  // Find most relevant milestone
+  // Whole-term matching: "Go" must not match "good", "Java" must not match "JavaScript"
+  const mentions = (term: string): boolean => {
+    const clean = term.trim().toLowerCase();
+    if (clean.length < 2) return false;
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`).test(targetTokens);
+  };
+
+  // Find most relevant milestone (the first one, usually the most recent, wins ties)
   let bestMilestone = baseFactSheet.careerMilestones[0];
-  let highestScore = -1;
+  let highestScore = 0;
 
   for (const milestone of baseFactSheet.careerMilestones) {
     let score = 0;
-    const companyLower = milestone.company.toLowerCase();
-    const domainLower = milestone.domain.toLowerCase();
-    const roleLower = milestone.role.toLowerCase();
-
-    // Check if target company or domain matches
-    if (targetTokens.includes(companyLower)) score += 10;
-    if (targetTokens.includes(domainLower)) score += 6;
-    if (targetTokens.includes(roleLower)) score += 4;
-
-    // Check technology overlaps
+    if (mentions(milestone.company)) score += 10;
+    if (mentions(milestone.domain)) score += 6;
+    if (mentions(milestone.role)) score += 4;
     for (const tech of milestone.technologies) {
-      if (targetTokens.includes(tech.toLowerCase())) {
-        score += 3;
-      }
+      if (mentions(tech)) score += 3;
     }
 
     if (score > highestScore) {
@@ -470,41 +480,53 @@ export function selectRelevantFactsForTarget(
     }
   }
 
-  // Find overlapping skills from tech stack
+  // Only tech the target actually mentions counts as shared
   const allTech = [
     ...baseFactSheet.techStack.languages,
     ...baseFactSheet.techStack.frameworks,
     ...baseFactSheet.techStack.toolsAndInfra,
     ...baseFactSheet.techStack.specializations,
   ];
+  const sharedTech = Array.from(new Set(allTech.filter(mentions))).slice(0, 4);
+  const sharedDomain =
+    bestMilestone?.domain && mentions(bestMilestone.domain) ? bestMilestone.domain : "";
 
-  const matchedTech = allTech
-    .filter((tech) => targetTokens.includes(tech.toLowerCase()))
-    .slice(0, 4);
-
-  const fallbackTech =
-    matchedTech.length > 0 ? matchedTech : allTech.slice(0, 4);
-
-  // Pick best conversation hook
-  const matchedHook =
-    baseFactSheet.conversationHooks.find((h) =>
-      targetTokens
-        .split(/\s+/)
-        .some((token) => token.length > 3 && h.toLowerCase().includes(token)),
-    ) ||
-    baseFactSheet.conversationHooks[0] ||
-    "";
+  // Pick the hook sharing the most meaningful words with the target, else the user's first hook
+  const targetWords = new Set(
+    targetTokens.split(/[^a-z0-9+#.]+/).filter((w) => w.length > 3 && !HOOK_STOPWORDS.has(w)),
+  );
+  let matchedHook = baseFactSheet.conversationHooks[0] || "";
+  let bestHookOverlap = 0;
+  for (const hook of baseFactSheet.conversationHooks) {
+    const overlap = hook
+      .toLowerCase()
+      .split(/[^a-z0-9+#.]+/)
+      .filter((w) => targetWords.has(w)).length;
+    if (overlap > bestHookOverlap) {
+      bestHookOverlap = overlap;
+      matchedHook = hook;
+    }
+  }
 
   const matchedHighlight = bestMilestone
     ? `${bestMilestone.role} at ${bestMilestone.company}: ${bestMilestone.keyImpact}`
     : baseFactSheet.identity.currentRole;
 
-  const promptSnippet = `RELEVANT SENDER GROUND TRUTH:
-Name: ${baseFactSheet.identity.fullName || "Candidate"}
-Current: ${baseFactSheet.identity.currentRole || "Specialist"}${baseFactSheet.identity.currentCompany ? ` at ${baseFactSheet.identity.currentCompany}` : ""}
-Relevant Past Impact: ${matchedHighlight}
-Shared Tech / Domain: ${fallbackTech.join(", ")}${bestMilestone?.domain ? ` (${bestMilestone.domain})` : ""}
-${matchedHook ? `Key Talking Point: ${matchedHook}` : ""}`;
+  // Label honestly: without any overlap this is just the user's latest work, not common ground
+  const impactLabel = highestScore > 0 ? "Relevant Past Impact" : "Recent Impact (no direct overlap with target)";
+
+  const promptSnippet = [
+    "RELEVANT SENDER GROUND TRUTH:",
+    `Name: ${baseFactSheet.identity.fullName || "Candidate"}`,
+    `Current: ${baseFactSheet.identity.currentRole || "Specialist"}${baseFactSheet.identity.currentCompany ? ` at ${baseFactSheet.identity.currentCompany}` : ""}`,
+    `${impactLabel}: ${matchedHighlight}`,
+    sharedTech.length > 0 || sharedDomain
+      ? `Shared Tech / Domain (both mention): ${[...sharedTech, sharedDomain].filter(Boolean).join(", ")}`
+      : "Shared Tech / Domain: none found, do not claim any shared stack",
+    matchedHook ? `Key Talking Point: ${matchedHook}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return {
     promptSnippet,
@@ -514,13 +536,15 @@ ${matchedHook ? `Key Talking Point: ${matchedHook}` : ""}`;
 
 export async function generateConnectionNote(
   apiKey: string = "",
-  model: string = "gpt-6-luna",
+  model: string = DEFAULT_MODEL,
   userProfile: UserProfile,
   stylePreferences: StylePreferences,
   targetProfile: TargetProfileData,
   customPromptModifier?: string,
   jobTargetSettings?: JobTargetSettings,
   baseFactSheet?: BaseFactSheet,
+  /** Receives the recommended note written so far while the model is still streaming */
+  onDraft?: (draftSoFar: string) => void,
 ): Promise<GenerateDraftResponse> {
   const resolved = resolveEffectiveApiKeyAndModel(
     apiKey,
@@ -528,7 +552,7 @@ export async function generateConnectionNote(
     Boolean(apiKey.trim()),
   );
   const cleanKey = resolved.apiKey || apiKey.trim();
-  const effectiveModel = resolved.model || model || "gpt-6-luna";
+  const effectiveModel = resolved.model || model || DEFAULT_MODEL;
 
   if (!cleanKey) {
     return {
@@ -671,70 +695,48 @@ Tone: ${selectedTone}
 ${jobTargetPromptContext}
 ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
 
-  const promptContent = `${senderContext}\n\n${targetContext}\n\n${userInstructions}\n\nGenerate 3 connection note options strictly under 200 characters each (aim 120-180 chars). Pick recommended note. Respond in valid JSON.`;
+  const promptContent = `${senderContext}\n\n${targetContext}\n\n${userInstructions}\n\nWrite the best connection note plus 2 alternatives, each strictly under 200 characters (aim 120-180). Reply in the RELATIONSHIP / NOTE / ALT / REASON format.`;
+
+  const parser = new DraftStreamParser("NOTE", true);
+  let lastSentDraft = "";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${cleanKey}`,
+    const result = await streamChatCompletion({
+      apiKey: cleanKey,
+      model: effectiveModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: promptContent },
+      ],
+      maxCompletionTokens: 1200,
+      serviceTier: "fast",
+      reasoningEffort: "low",
+      onText: (fullText) => {
+        if (!onDraft) return;
+        parser.update(fullText);
+        const draftSoFar = parser.draft;
+        if (draftSoFar && draftSoFar !== lastSentDraft) {
+          lastSentDraft = draftSoFar;
+          onDraft(draftSoFar);
+        }
       },
-      body: JSON.stringify({
-        model: effectiveModel || "gpt-6-luna",
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: promptContent },
-        ],
-        max_completion_tokens: 1500,
-      }),
     });
 
-    const data = (await response.json()) as OpenAiChatCompletionResponse;
+    parser.update(result.text);
+    const recommended = parser.finalDraft;
+    const extras = parseNoteExtras(result.text);
 
-    if (!response.ok) {
-      const errorMsg =
-        data.error?.message || `OpenAI API returned HTTP ${response.status}`;
-      return { success: false, error: errorMsg };
-    }
-
-    const choice = data.choices[0];
-    const rawContent = choice?.message?.content?.trim() || "";
-
-    if (!rawContent && choice?.finish_reason === "length") {
+    if (!recommended && extras.options.length === 0) {
       return {
         success: false,
-        error:
-          "OpenAI token limit was reached during reasoning before generating the note.",
+        error: `Model returned an empty note${result.finishReason ? ` (${result.finishReason})` : ""}. Please retry.`,
       };
     }
 
-    const parsed = parseConnectionNoteResponseJson(rawContent);
-    let draftText = parsed.draftText.trim();
-
-    // Strip quotation marks
-    if (
-      (draftText.startsWith('"') && draftText.endsWith('"')) ||
-      (draftText.startsWith("'") && draftText.endsWith("'"))
-    ) {
-      draftText = draftText.slice(1, -1).trim();
-    }
-
-    // Clean up punctuation and em dashes
-    draftText = sanitizePunctuation(draftText);
-
-    // Enforce 200 character ceiling
-    if (draftText.length > 200) {
-      const truncated = draftText.slice(0, 196);
-      const lastPeriod = truncated.lastIndexOf(".");
-      if (lastPeriod > 120) {
-        draftText = truncated.slice(0, lastPeriod + 1);
-      } else {
-        const lastSpace = truncated.lastIndexOf(" ");
-        draftText =
-          (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + "...";
-      }
+    // Prefer a complete note that fits over chopping the recommended one mid-sentence
+    let draftText = pickNoteWithinLimit(recommended, extras.options);
+    if (!draftText) {
+      draftText = await shortenNote(cleanKey, effectiveModel, recommended || extras.options[0].text);
     }
 
     return {
@@ -742,12 +744,40 @@ ${customPromptModifier ? `User tweak request: ${customPromptModifier}` : ""}`;
       draftText,
       characterCount: draftText.length,
       matchedHighlight: matchedHighlight || undefined,
-      options: parsed.options,
-      recommendedReason: parsed.recommendedReason,
-      risk: parsed.risk,
+      options: extras.options,
+      recommendedReason: extras.recommendedReason,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: `OpenAI connection failed: ${message}` };
   }
+}
+
+/**
+ * Asks the model to cut an over-long note under 200 characters, falling back to a
+ * boundary-aware trim if that still doesn't fit.
+ */
+async function shortenNote(apiKey: string, model: string, note: string): Promise<string> {
+  try {
+    const result = await streamChatCompletion({
+      apiKey,
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Shorten the LinkedIn connection note to under 190 characters. Keep its meaning, voice and specific details. No em dashes. Output only the note.",
+        },
+        { role: "user", content: note },
+      ],
+      maxCompletionTokens: 600,
+      serviceTier: "fast",
+      reasoningEffort: "low",
+    });
+    const shortened = sanitizePunctuation(result.text.replace(/^["']|["']$/g, ""));
+    if (shortened && shortened.length <= 200) return shortened;
+  } catch {
+    // Fall through to the local trim
+  }
+  return trimToLimit(note);
 }

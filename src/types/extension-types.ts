@@ -187,15 +187,17 @@ export type CommentAnglePreference =
   | 'banter'
   | 'peer_take';
 
-export interface CommentOption {
-  move: string;
-  comment: string;
+export interface PreviousCommentDraft {
+  text: string;
+  move?: string;
 }
 
 export interface GenerateCommentRequest {
   postContext: PostContext;
   customPromptModifier?: string;
   commentAngle?: CommentAnglePreference;
+  /** Drafts the user already passed on via 'New Angle', most recent last */
+  previousDrafts?: PreviousCommentDraft[];
 }
 
 export interface GenerateCommentResponse {
@@ -207,11 +209,6 @@ export interface GenerateCommentResponse {
   planUsed?: string;
   messagesRemaining?: number;
   monthlyLimitReached?: boolean;
-  postType?: string;
-  confidence?: 'high' | 'medium' | 'low';
-  options?: CommentOption[];
-  recommendedReason?: string;
-  risk?: string;
 }
 
 export type MessageIntent =
@@ -241,11 +238,6 @@ export interface ConversationContext {
   recipientProfile?: TargetProfileData;
 }
 
-export interface MessageOption {
-  move: string;
-  text: string;
-}
-
 export interface GenerateMessageRequest {
   conversation: ConversationContext;
   intent?: MessageIntent;
@@ -256,14 +248,18 @@ export interface GenerateMessageRequest {
 export interface GenerateMessageResponse {
   success: boolean;
   messageText?: string;
-  options?: MessageOption[];
-  recommendedReason?: string;
-  risk?: string;
   error?: string;
   planUsed?: string;
   messagesRemaining?: number;
   monthlyLimitReached?: boolean;
 }
+
+/** Port name for streamed note/comment/message generation between content script and service worker */
+export const GENERATION_PORT_NAME = 'okwu-generate';
+
+export type GenerationStreamEvent =
+  | { event: 'draft'; text: string }
+  | { event: 'done'; response: ExtensionMessageResponse<unknown> };
 
 export interface ParseResumeResponse {
   success: boolean;

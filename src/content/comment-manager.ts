@@ -1,19 +1,17 @@
 import {
-  ExtensionMessageResponse,
-  ExtensionSettings,
   GenerateCommentResponse,
-  CommentAnglePreference
+  CommentAnglePreference,
+  PreviousCommentDraft
 } from '../types/extension-types';
+import { getCachedSettings } from './settings-cache';
 import {
   findPostContainer,
   extractPostContext,
   expandPostText,
   isCommentEditorEmpty
 } from './comment-extractor';
-import {
-  insertCommentIntoEditor,
-  findCommentEditors
-} from './comment-injector';
+import { findCommentEditors } from './comment-injector';
+import { createEditorStreamWriter, streamGeneration } from './stream-client';
 
 let commentToastHost: HTMLDivElement | null = null;
 let isCurrentlyGeneratingComment = false;
@@ -96,12 +94,23 @@ export function showCommentToast(
   }
 }
 
+const COMMENT_BOX_SELECTOR = '.ckymfu, .comments-comment-box, div[id*="asyncInlineCommentBoxSlot"]';
+
+const POST_CARD_SELECTOR =
+  'div[role="listitem"], [componentkey^="expanded"], [id^="expanded"], .feed-shared-update-v2, article';
+
+function getCommentBox(editor: HTMLElement): Element | null {
+  return editor.closest(COMMENT_BOX_SELECTOR) || editor.parentElement;
+}
+
 /**
- * Triggers generation of an unconventional comment for a specific editor and post.
+ * Triggers generation of a comment for a specific editor and post. `previous` holds drafts the
+ * user already rejected with 'New Angle', so the next one takes a different approach.
  */
 export async function triggerCommentGeneration(
   editor: HTMLElement,
-  angleOverride?: CommentAnglePreference
+  angleOverride?: CommentAnglePreference,
+  previous: PreviousCommentDraft[] = []
 ): Promise<void> {
   if (isCurrentlyGeneratingComment) return;
 
@@ -114,10 +123,12 @@ export async function triggerCommentGeneration(
   let postContainer = findPostContainer(editor);
   let postContext = postContainer ? extractPostContext(postContainer) : null;
 
-  // Spatial fallback: search for nearest post commentary above this editor in the viewport
+  // Spatial fallback: nearest post commentary above this editor, kept inside the editor's own
+  // post card when there is one so a neighbouring post is never picked up
   if (!postContext?.postText || postContext.postText.length < 15) {
+    const searchRoot: ParentNode = editor.closest<HTMLElement>(POST_CARD_SELECTOR) || document;
     const allTextBoxes = Array.from(
-      document.querySelectorAll<HTMLElement>(
+      searchRoot.querySelectorAll<HTMLElement>(
         '[data-testid="expandable-text-box"], [data-sdui-anchor-id*="commentary"], .feed-shared-update-v2__description, .update-components-text'
       )
     );
@@ -135,18 +146,16 @@ export async function triggerCommentGeneration(
       }
       const boxRect = box.getBoundingClientRect();
       const dist = editorRect.top - boxRect.bottom;
-      // Accept elements that appear above the comment box
-      if (dist >= -50 && dist < closestDist) {
+      // Accept elements just above the comment box; outside a card, anything far away is another post
+      const maxDist = searchRoot === document ? 600 : Infinity;
+      if (dist >= -50 && dist < closestDist && dist <= maxDist) {
         closestDist = dist;
         closestAbove = box;
       }
     }
 
     if (closestAbove) {
-      const parentCard =
-        closestAbove.closest<HTMLElement>(
-          'div[role="listitem"], [componentkey^="expanded"], [id^="expanded"], .feed-shared-update-v2, article'
-        ) || closestAbove.parentElement;
+      const parentCard = closestAbove.closest<HTMLElement>(POST_CARD_SELECTOR) || closestAbove.parentElement;
 
       if (parentCard) {
         postContainer = parentCard;
@@ -179,59 +188,52 @@ export async function triggerCommentGeneration(
   // Show the user: spinner and "Drafting authentic comment with Okwu..."
   showCommentToast('Okwu: Drafting authentic comment...');
 
-  // First draft lets the model pick the move that fits the post; 'New Angle' cycles through explicit moves
-  const angles: CommentAnglePreference[] = [
-    'auto',
-    'congrats',
-    'clarifying_question',
-    'banter',
-    'well_wishes',
-    'peer_take'
-  ];
-
-  const chosenAngle = angleOverride || 'auto';
-
-  chrome.runtime.sendMessage(
+  // Type the comment into the box as the model writes it
+  const writer = createEditorStreamWriter(editor);
+  const response = await streamGeneration<GenerateCommentResponse>(
     {
       type: 'GENERATE_COMMENT',
       payload: {
         postContext,
-        commentAngle: chosenAngle
+        commentAngle: angleOverride || 'auto',
+        previousDrafts: previous.length > 0 ? previous : undefined
       }
     },
-    async (response: ExtensionMessageResponse<GenerateCommentResponse>) => {
-      isCurrentlyGeneratingComment = false;
-      updateToolbarButtonState(editor, false);
-
-      if (response?.success && response.data?.commentText) {
-        const comment = response.data.commentText;
-        await insertCommentIntoEditor(editor, comment);
-        editor.setAttribute('data-ai-comment-handled', 'true');
-
-        showCommentToast('Okwu comment applied', true, () => {
-          // Allow user to click 'New Angle' to regenerate
-          const nextAngle =
-            angles[(angles.indexOf(chosenAngle) + 1) % angles.length];
-          editor.removeAttribute('data-ai-comment-handled');
-          triggerCommentGeneration(editor, nextAngle);
-        });
-      } else {
-        editor.setAttribute('data-ai-comment-handled', 'error');
-        const errorMsg =
-          response?.error ||
-          response?.data?.error ||
-          'Failed to generate comment. Click Okwu to retry.';
-        showCommentToast(`AI Error: ${errorMsg}`, true);
-      }
-    }
+    (draftSoFar) => writer.update(draftSoFar)
   );
+
+  isCurrentlyGeneratingComment = false;
+  updateToolbarButtonState(editor, false);
+
+  const commentText = response?.data?.commentText;
+  if (response?.success && commentText) {
+    await writer.finish(commentText);
+    editor.setAttribute('data-ai-comment-handled', 'true');
+
+    showCommentToast('Okwu comment applied', true, () => {
+      // 'New Angle' lets the model pick a different move that still fits this post
+      editor.removeAttribute('data-ai-comment-handled');
+      triggerCommentGeneration(editor, 'auto', [
+        ...previous,
+        { text: commentText, move: response.data?.angleUsed }
+      ].slice(-4));
+    });
+  } else {
+    await writer.clear();
+    editor.setAttribute('data-ai-comment-handled', 'error');
+    const errorMsg =
+      response?.error ||
+      response?.data?.error ||
+      'Failed to generate comment. Click Okwu to retry.';
+    showCommentToast(`AI Error: ${errorMsg}`, true);
+  }
 }
 
 /**
  * Updates the state of the toolbar button inside the comment box.
  */
 function updateToolbarButtonState(editor: HTMLElement, isGenerating: boolean): void {
-  const commentBox = editor.closest('.ckymfu, .comments-comment-box, div[id*="asyncInlineCommentBoxSlot"]') || editor.parentElement;
+  const commentBox = getCommentBox(editor);
   if (!commentBox) return;
 
   const btn = commentBox.querySelector<HTMLButtonElement>('.linkedin-ai-generate-comment-btn');
@@ -258,7 +260,7 @@ function updateToolbarButtonState(editor: HTMLElement, isGenerating: boolean): v
  * Injects a handy "✨ Okwu" button into the comment box toolbar.
  */
 function injectCommentToolbarButton(editor: HTMLElement): void {
-  const commentBox = editor.closest('.ckymfu, .comments-comment-box, div[id*="asyncInlineCommentBoxSlot"]') || editor.parentElement;
+  const commentBox = getCommentBox(editor);
   if (!commentBox) return;
 
   if (commentBox.querySelector('.linkedin-ai-generate-comment-btn')) return;
@@ -317,54 +319,52 @@ function injectCommentToolbarButton(editor: HTMLElement): void {
 /**
  * Checks all visible comment editors across the document and auto-drafts when a new comment box comes up.
  */
-export function checkAndAutofillComments(): void {
+/** Toolbars can render after the editor, so retry injection a few times, then stop checking that editor. */
+const MAX_BUTTON_INJECTION_ATTEMPTS = 10;
+const buttonInjectionAttempts = new WeakMap<HTMLElement, number>();
+
+function needsToolbarButton(editor: HTMLElement): boolean {
+  const commentBox = getCommentBox(editor);
+  if (commentBox?.querySelector('.linkedin-ai-generate-comment-btn')) return false;
+  return (buttonInjectionAttempts.get(editor) || 0) < MAX_BUTTON_INJECTION_ATTEMPTS;
+}
+
+export async function checkAndAutofillComments(): Promise<void> {
   // Prevent calling chrome API if extension context has been invalidated or reloaded
   if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
 
   const editors = findCommentEditors(document);
   if (editors.length === 0) return;
 
-  // Pre-filter: only query extension settings if at least one editor needs button injection or auto-fill
-  const needsAction = editors.some((editor) => {
-    const commentBox =
-      editor.closest('.ckymfu, .comments-comment-box, div[id*="asyncInlineCommentBoxSlot"]') ||
-      editor.parentElement;
-    const hasButton = Boolean(commentBox?.querySelector('.linkedin-ai-generate-comment-btn'));
-    const isHandled = Boolean(editor.getAttribute('data-ai-comment-handled'));
-    const isEmpty = isCommentEditorEmpty(editor);
-
-    return !hasButton || (!isHandled && isEmpty);
-  });
-
+  // Pre-filter: only continue if at least one editor needs button injection or auto-fill
+  const needsAction = editors.some(
+    (editor) =>
+      needsToolbarButton(editor) ||
+      (!editor.getAttribute('data-ai-comment-handled') && isCommentEditorEmpty(editor))
+  );
   if (!needsAction) return;
 
-  try {
-    chrome.runtime.sendMessage(
-      { type: 'GET_SETTINGS' },
-      (response: ExtensionMessageResponse<ExtensionSettings>) => {
-        if (chrome.runtime?.lastError || !response?.data) return;
-        const settings = response.data;
-        if (settings.useCustomApiKey && !settings.openaiApiKey) return;
+  const settings = await getCachedSettings();
+  if (!settings) return;
+  if (settings.useCustomApiKey && !settings.openaiApiKey) return;
 
-        for (const editor of editors) {
-          // Ensure toolbar button is attached
-          injectCommentToolbarButton(editor);
+  for (const editor of editors) {
+    if (needsToolbarButton(editor)) {
+      buttonInjectionAttempts.set(editor, (buttonInjectionAttempts.get(editor) || 0) + 1);
+      injectCommentToolbarButton(editor);
+    }
+  }
 
-          // Automatic trigger: when the comment box comes up and is empty
-          if (settings.autoFillComment === false) continue;
-          if (editor.getAttribute('data-ai-comment-handled')) continue;
-          if (!isCommentEditorEmpty(editor)) continue;
+  // Automatic trigger: when the comment box comes up and is empty
+  if (settings.autoFillComment !== true || isCurrentlyGeneratingComment) return;
+  for (const editor of editors) {
+    if (editor.getAttribute('data-ai-comment-handled')) continue;
+    if (!isCommentEditorEmpty(editor)) continue;
 
-          // Verify editor is visible in the viewport or active
-          const rect = editor.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            triggerCommentGeneration(editor);
-            break; // Process one comment box at a time to prevent duplicate calls
-          }
-        }
-      }
-    );
-  } catch {
-    // Context invalidated, ignore
+    const rect = editor.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      triggerCommentGeneration(editor);
+      break; // Process one comment box at a time to prevent duplicate calls
+    }
   }
 }

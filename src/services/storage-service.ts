@@ -74,7 +74,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   jobTargetSettings: DEFAULT_JOB_TARGET_SETTINGS,
   autoInjectButton: true,
   autoFillNote: true,
-  autoFillComment: true,
+  // Opt-in: auto-drafting on every opened comment box spends free-tier generations just for reading
+  autoFillComment: false,
   usageStats: DEFAULT_USAGE_STATS
 };
 
