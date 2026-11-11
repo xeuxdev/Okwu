@@ -14,13 +14,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.21.0",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "dependencies": {
     "lucide-react": "^1.45.0",
